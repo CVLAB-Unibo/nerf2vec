@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .utils import Rays
+from utils import Rays
 
 
 def _load_renderings(root_fp: str, subject_id: str, split: str):
