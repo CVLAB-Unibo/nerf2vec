@@ -6,6 +6,8 @@ from random import randint
 from typing import Any, Dict, Tuple
 
 from nerf_loader import NeRFLoader
+from ngp_nerf2vec import NGPradianceField
+import config
 
 class NeRFDataset(Dataset):
     def __init__(self, nerfs_root: str, sample_sd: Dict[str, Any]) -> None:
@@ -13,7 +15,7 @@ class NeRFDataset(Dataset):
         
         self.nerfs_root = nerfs_root
 
-        self.nerfs_path = self._get_nerf_paths()
+        self.nerf_paths = self._get_nerf_paths()
     
     def __len__(self) -> int:
         return len(self.nerf_paths)
@@ -26,6 +28,20 @@ class NeRFDataset(Dataset):
             root_fp=self.nerfs_root,
             num_rays=None,
             **dataset_kwargs,)
+        
+        radiance_field = NGPradianceField(
+            aabb=config.AABB,
+            unbounded=args.unbounded,
+            encoding=args.coordinate_encoding,
+            mlp=args.mlp,
+            activation=args.activation,
+            n_hidden_layers=args.n_hidden_layers,
+            n_neurons=args.n_neurons,
+            encoding_size=args.encoding_size
+        ).to(device)
+        
+        return nerf_loader
+        
     
     def _get_nerf_paths(self):
         

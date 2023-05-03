@@ -74,7 +74,8 @@ class NeRFLoader(torch.utils.data.Dataset):
         self.color_bkgd_aug = color_bkgd_aug
 
         weights_file_name = 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth'
-        self.weights_file_path = os.path.join(root_fp, subject_id, weights_file_name)
+        weights_file_path = os.path.join(root_fp, subject_id, weights_file_name)
+        self.weights = torch.load(weights_file_path)
         
         split = 'train'
         self.images, self.camtoworlds, self.focal = _load_renderings(
