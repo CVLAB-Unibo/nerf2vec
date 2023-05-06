@@ -9,10 +9,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from utils import Rays
+from nerf.utils import Rays
 
 
-def _load_renderings(root_fp: str, subject_id: str, split: str):
+def _load_renderings(data_dir: str, split: str):
+    """
     if not root_fp.startswith("/"):
         root_fp = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
@@ -20,8 +21,9 @@ def _load_renderings(root_fp: str, subject_id: str, split: str):
             "..",
             root_fp,
         )
+    """
 
-    data_dir = os.path.join(root_fp, subject_id)
+    # data_dir = os.path.join(root_fp, subject_id)
     print(f'Loading renderings from: {data_dir}')
     
     with open(
@@ -57,13 +59,15 @@ class NeRFLoader(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        subject_id: str,
-        root_fp: str,
+        data_dir: str,
+        split: str = "train",
         color_bkgd_aug: str = "random",  # NERF2VEC (Originally, it was white)
         num_rays: int = None,
         near: float = None,
         far: float = None,
         device: str = "cuda:0",
+        weights_file_name: str = "bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth",
+        training: bool = True
     ):
         super().__init__()
         assert color_bkgd_aug in ["white", "black", "random"]
@@ -71,15 +75,15 @@ class NeRFLoader(torch.utils.data.Dataset):
         self.near = self.NEAR if near is None else near
         self.far = self.FAR if far is None else far
 
+        self.training = training
+
         self.color_bkgd_aug = color_bkgd_aug
 
-        weights_file_name = 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth'
-        weights_file_path = os.path.join(root_fp, subject_id, weights_file_name)
-        self.weights = torch.load(weights_file_path)
+        self.weights_file_path = os.path.join(data_dir, weights_file_name)
+        # self.weights = torch.load(weights_file_path)
         
-        split = 'train'
         self.images, self.camtoworlds, self.focal = _load_renderings(
-            root_fp, subject_id, split
+            data_dir, split
         )
         self.images = torch.from_numpy(self.images).to(device).to(torch.uint8)
         self.camtoworlds = (
@@ -111,8 +115,15 @@ class NeRFLoader(torch.utils.data.Dataset):
         rgba, rays = data["rgba"], data["rays"]
         pixels, alpha = torch.split(rgba, [3, 1], dim=-1)
 
-        # TODO: Evaluate the best background color
-        color_bkgd = torch.ones(3, device=self.images.device)
+        if self.training:
+            if self.color_bkgd_aug == "random":
+                color_bkgd = torch.rand(3, device=self.images.device)
+            elif self.color_bkgd_aug == "white":
+                color_bkgd = torch.ones(3, device=self.images.device)
+            elif self.color_bkgd_aug == "black":
+                color_bkgd = torch.zeros(3, device=self.images.device)
+        else:
+            color_bkgd = torch.ones(3, device=self.images.device)
 
         pixels = pixels * alpha + color_bkgd * (1.0 - alpha)
         return {
@@ -122,17 +133,37 @@ class NeRFLoader(torch.utils.data.Dataset):
             **{k: v for k, v in data.items() if k not in ["rgba", "rays"]},
         }
 
+    def update_num_rays(self, num_rays):
+        self.num_rays = num_rays
+
     def fetch_data(self, index):
         """Fetch the data (it maybe cached for multiple batches)."""
-        
-        image_id = [index]
-        x, y = torch.meshgrid(
-            torch.arange(self.WIDTH, device=self.images.device),
-            torch.arange(self.HEIGHT, device=self.images.device),
-            indexing="xy",
-        )
-        x = x.flatten()
-        y = y.flatten()
+
+        num_rays = self.num_rays
+
+        if self.training:
+            image_id = torch.randint(
+                0,
+                len(self.images),
+                size=(num_rays,),
+                device=self.images.device,
+            )
+
+            x = torch.randint(
+                0, self.WIDTH, size=(num_rays,), device=self.images.device
+            )
+            y = torch.randint(
+                0, self.HEIGHT, size=(num_rays,), device=self.images.device
+            )
+        else:
+            image_id = [index]
+            x, y = torch.meshgrid(
+                torch.arange(self.WIDTH, device=self.images.device),
+                torch.arange(self.HEIGHT, device=self.images.device),
+                indexing="xy",
+            )
+            x = x.flatten()
+            y = y.flatten()
 
         # generate rays
         rgba = self.images[image_id, y, x] / 255.0  # (num_rays, 4)
@@ -159,9 +190,14 @@ class NeRFLoader(torch.utils.data.Dataset):
             directions, dim=-1, keepdims=True
         )
         
-        origins = torch.reshape(origins, (self.HEIGHT, self.WIDTH, 3))
-        viewdirs = torch.reshape(viewdirs, (self.HEIGHT, self.WIDTH, 3))
-        rgba = torch.reshape(rgba, (self.HEIGHT, self.WIDTH, 4))
+        if self.training:
+            origins = torch.reshape(origins, (num_rays, 3))
+            viewdirs = torch.reshape(viewdirs, (num_rays, 3))
+            rgba = torch.reshape(rgba, (num_rays, 4))
+        else:
+            origins = torch.reshape(origins, (self.HEIGHT, self.WIDTH, 3))
+            viewdirs = torch.reshape(viewdirs, (self.HEIGHT, self.WIDTH, 3))
+            rgba = torch.reshape(rgba, (self.HEIGHT, self.WIDTH, 4))
 
         rays = Rays(origins=origins, viewdirs=viewdirs)
 

@@ -3,10 +3,12 @@ from typing import Optional
 
 import numpy as np
 import torch
-from utils import Rays, namedtuple_map
+# from utils import Rays, namedtuple_map
+import collections
 
 from nerfacc import OccupancyGrid, ray_marching, rendering
 
+from nerf.utils import Rays, namedtuple_map
 
 def set_random_seed(seed):
     random.seed(seed)
