@@ -124,9 +124,9 @@ class NGPradianceField(torch.nn.Module):
                     "otype": "Identity"
                 }
 
-        print(f'*'*40)
-        print(f'Initializing model: \n- mlp: {mlp} - {n_hidden_layers} hidden layers - {n_neurons} neurons\n- activation: {activation.upper()}\n- encoding: {encoding.upper()} - size: {encoding_size}')
-        print(f'*'*40)
+        # print(f'*'*40)
+        # print(f'Initializing model: \n- mlp: {mlp} - {n_hidden_layers} hidden layers - {n_neurons} neurons\n- activation: {activation.upper()}\n- encoding: {encoding.upper()} - size: {encoding_size}')
+        # print(f'*'*40)
         self.mlp_base = tcnn.NetworkWithInputEncoding(
             seed=999,
             n_input_dims=self.num_dim+self.geo_feat_dim,

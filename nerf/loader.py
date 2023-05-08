@@ -24,7 +24,7 @@ def _load_renderings(data_dir: str, split: str):
     """
 
     # data_dir = os.path.join(root_fp, subject_id)
-    print(f'Loading renderings from: {data_dir}')
+    # print(f'Loading renderings from: {data_dir}')
     
     with open(
         os.path.join(data_dir, "transforms_{}.json".format(split)), "r"
