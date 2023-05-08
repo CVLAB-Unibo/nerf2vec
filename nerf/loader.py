@@ -75,7 +75,9 @@ class NeRFLoader(torch.utils.data.Dataset):
         self.near = self.NEAR if near is None else near
         self.far = self.FAR if far is None else far
 
-        self.training = training
+        self.training = (num_rays is not None) and (
+            split in ["train", "trainval"]
+        )
 
         self.color_bkgd_aug = color_bkgd_aug
 
@@ -123,7 +125,7 @@ class NeRFLoader(torch.utils.data.Dataset):
             elif self.color_bkgd_aug == "black":
                 color_bkgd = torch.zeros(3, device=self.images.device)
         else:
-            color_bkgd = torch.ones(3, device=self.images.device)
+            color_bkgd = torch.zeros(3, device=self.images.device)
 
         pixels = pixels * alpha + color_bkgd * (1.0 - alpha)
         return {

@@ -41,7 +41,7 @@ class NeRFDataset(Dataset):
 
         data_dir = self.nerf_paths[index]
 
-        nerf_loader = NeRFLoader2(
+        nerf_loader = NeRFLoader(
             data_dir=data_dir,
             num_rays=config.NUM_RAYS,
             device=self.device,
@@ -63,10 +63,10 @@ class NeRFDataset(Dataset):
         
 
         # Get data for the batch
-        # data = nerf_loader[0]
-        data = nerf_loader.get_sample()
+        data = nerf_loader[0]
+        # data = nerf_loader.get_sample()
         render_bkgd = data["color_bkgd"]
-        # rays = data["rays"]
+        rays = data["rays"]
         pixels = data["pixels"]
 
 
@@ -75,7 +75,7 @@ class NeRFDataset(Dataset):
         # del nerf_loader
         # del scene_aabb
 
-        return pixels.to('cpu'), nerf_loader.weights_file_path
+        return rays, pixels, render_bkgd, nerf_loader.weights_file_path, nerf_loader.focal, data_dir
         
     
     def _get_nerf_paths(self, nerfs_root: str):
