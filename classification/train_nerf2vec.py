@@ -120,9 +120,3 @@ class Nerf2vecTrainer:
 
                 embeddings = self.encoder(matrices)
                 pred = self.decoder(embeddings, selected_coords)
-
-
-
-
-    
-    

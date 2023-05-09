@@ -43,7 +43,13 @@ def render_image(
     timestamps: Optional[torch.Tensor] = None,
 ):
     """Render the pixels of an image."""
-    rays_shape = rays.origins.shape
+    
+    """
+    # ################################################################################
+    # __D
+    # __D this is the shape that arrives when testing. Will decide later what to do
+    # __D
+    # ################################################################################
     if len(rays_shape) == 3:
         height, width, _ = rays_shape
         num_rays = height * width
@@ -52,6 +58,9 @@ def render_image(
         )
     else:
         num_rays, _ = rays_shape
+    """
+    rays_shape = rays.origins.shape
+    batch_size, num_rays, coordinates = rays_shape  # __D Remove unused variables once the debug is complete
 
     def sigma_fn(t_starts, t_ends, ray_indices):
         t_origins = chunk_rays.origins[ray_indices]
@@ -90,22 +99,68 @@ def render_image(
         if radiance_field.training
         else test_chunk_size
     )
-    test = 5
+    
+    
+    # Divide in chunks [batch_size, ]
     for i in range(0, num_rays, chunk):
-        chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays)
-        ray_indices, t_starts, t_ends = ray_marching(
-            chunk_rays.origins,
-            chunk_rays.viewdirs,
-            scene_aabb=scene_aabb,
-            grid=occupancy_grid,
-            sigma_fn=sigma_fn,
-            near_plane=near_plane,
-            far_plane=far_plane,
-            render_step_size=render_step_size,
-            stratified=radiance_field.training,
-            cone_angle=cone_angle,
+        # chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays)
+        chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)  # Add the batch size
+
+        b_ray_indices = torch.zeros(batch_size, 1)
+        b_t_starts = torch.zeros(batch_size, chunk, 1)
+        b_t_ends = torch.zeros(batch_size, chunk, 1)
+
+
+        for batch_idx in range(batch_size):
+            ray_indices, t_starts, t_ends = ray_marching(
+                chunk_rays[batch_idx].origins,  # [batch_size, chunk, 3d coord]
+                chunk_rays[batch_idx].viewdirs, # [batch_size, chunk, 3d coord]
+                scene_aabb=scene_aabb, 
+                grid=occupancy_grid[batch_idx], # [batch_size, occupancy_grids]
+                sigma_fn=None,#sigma_fn,
+                near_plane=near_plane,
+                far_plane=far_plane,
+                render_step_size=render_step_size,
+                stratified=radiance_field.training,
+                cone_angle=cone_angle,
+                alpha_thre=alpha_thre,
+            )
+
+            # Add the variables to three different arrays, that keep in consideration the batch size
+            b_ray_indices[batch_idx] = ray_indices  
+            b_t_starts[batch_idx] = t_starts
+            b_t_ends[batch_idx] = t_ends
+        
+        b_t_origins = rays.origins[:, b_ray_indices]
+        b_t_dirs = rays.viewdirs[:, b_ray_indices]
+        b_positions = b_t_origins + b_t_dirs * (b_t_starts + b_t_ends) / 2.0
+
+        # __D Positions must have shape [batch_size, chunk, 3d_coord]
+        _, sigmas = radiance_field._query_density_and_rgb(b_positions, None)
+        assert (
+            sigmas.shape == t_starts.shape
+        ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
+        alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
+
+        
+        # Compute visibility of the samples, and filter out invisible samples
+        masks = render_visibility(
+            alphas,
+            ray_indices=ray_indices,
+            packed_info=packed_info,
+            early_stop_eps=early_stop_eps,
             alpha_thre=alpha_thre,
+            n_rays=rays_o.shape[0],
         )
+        ray_indices, t_starts, t_ends = (
+            ray_indices[masks],
+            t_starts[masks],
+            t_ends[masks],
+        )
+
+
+
+
         rgb, opacity, depth = rendering(
             t_starts,
             t_ends,
