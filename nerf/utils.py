@@ -1,6 +1,10 @@
+from collections import OrderedDict
+import collections
 from typing import Any, Dict
 from torch import Tensor
-import collections
+import torch
+
+from classification import config
 
 
 def next_multiple(val, divisor):
@@ -33,13 +37,26 @@ def next_multiple_2(val, divisor):
     return ((val - 1) | (divisor -1)) + 1
 
 
-def get_mlp_params_as_matrix(flattened_params: Tensor, sd: Dict[str, Any]) -> Tensor:
+def get_mlp_params_as_matrix(flattened_params: Tensor, sd: Dict[str, Any] = None) -> Tensor:
+
+    if sd is None:
+         sd = get_mlp_sample_sd()
+
     params_shapes = [p.shape for p in sd.values()]
     feat_dim = params_shapes[0][0]
     start = params_shapes[0].numel() #+ params_shapes[1].numel()
     end = params_shapes[-1].numel() #+ params_shapes[-2].numel()
     params = flattened_params[start:-end]
     return params.reshape((-1, feat_dim))
+
+def get_mlp_sample_sd():
+    sample_sd = OrderedDict()
+    sample_sd['input'] = torch.zeros(config.MLP_UNITS, next_multiple(config.MLP_INPUT_SIZE_AFTER_ENCODING, config.TINY_CUDA_MIN_SIZE))
+    for i in range(config.MLP_HIDDEN_LAYERS):
+        sample_sd[f'hid_{i}'] = torch.zeros(config.MLP_UNITS, config.MLP_UNITS)
+    sample_sd['output'] = torch.zeros(next_multiple(config.MLP_OUTPUT_SIZE, config.TINY_CUDA_MIN_SIZE), config.MLP_UNITS)
+
+    return sample_sd
 
 
 Rays = collections.namedtuple("Rays", ("origins", "viewdirs"))
