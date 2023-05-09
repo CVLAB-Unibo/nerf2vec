@@ -106,15 +106,16 @@ def render_image(
         # chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays)
         chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)  # Add the batch size
 
+        tensor_size = chunk if num_rays >= chunk else num_rays
         b_ray_indices = torch.zeros(batch_size, 1)
-        b_t_starts = torch.zeros(batch_size, chunk, 1)
-        b_t_ends = torch.zeros(batch_size, chunk, 1)
+        b_t_starts = torch.zeros(batch_size, tensor_size, 1)
+        b_t_ends = torch.zeros(batch_size, tensor_size, 1)
 
 
         for batch_idx in range(batch_size):
             ray_indices, t_starts, t_ends = ray_marching(
-                chunk_rays[batch_idx].origins,  # [batch_size, chunk, 3d coord]
-                chunk_rays[batch_idx].viewdirs, # [batch_size, chunk, 3d coord]
+                chunk_rays.origins[batch_idx],  # [batch_size, chunk, 3d coord]
+                chunk_rays.viewdirs[batch_idx], # [batch_size, chunk, 3d coord]
                 scene_aabb=scene_aabb, 
                 grid=occupancy_grid[batch_idx], # [batch_size, occupancy_grids]
                 sigma_fn=None,#sigma_fn,
@@ -131,8 +132,8 @@ def render_image(
             b_t_starts[batch_idx] = t_starts
             b_t_ends[batch_idx] = t_ends
         
-        b_t_origins = rays.origins[:, b_ray_indices]
-        b_t_dirs = rays.viewdirs[:, b_ray_indices]
+        b_t_origins = chunk_rays.origins[:, b_ray_indices]
+        b_t_dirs = chunk_rays.viewdirs[:, b_ray_indices]
         b_positions = b_t_origins + b_t_dirs * (b_t_starts + b_t_ends) / 2.0
 
         # __D Positions must have shape [batch_size, chunk, 3d_coord]
@@ -142,7 +143,7 @@ def render_image(
         ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
         alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
 
-        
+        """
         # Compute visibility of the samples, and filter out invisible samples
         masks = render_visibility(
             alphas,
@@ -157,6 +158,7 @@ def render_image(
             t_starts[masks],
             t_ends[masks],
         )
+        """
 
 
 

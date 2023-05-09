@@ -7,6 +7,7 @@ from classification.utils import get_mlp_params_as_matrix, next_multiple
 import os
 import torch
 from torch.utils.data import DataLoader, Dataset
+from models.idecoder import ImplicitDecoder
 
 from nerf.loader import NeRFLoader
 
@@ -16,7 +17,7 @@ from typing import Any, Dict, Tuple
 
 from nerf.intant_ngp import NGPradianceField
 from classification import config
-from nerf.utils import generate_occupancy_grid
+from nerf.utils import generate_occupancy_grid, render_image
 
 class NeRFDataset(Dataset):
     def __init__(self, nerfs_root: str, sample_sd: Dict[str, Any], device: str) -> None:
@@ -25,6 +26,11 @@ class NeRFDataset(Dataset):
         self.nerf_paths = self._get_nerf_paths(nerfs_root)
 
         self.device = device
+
+
+        
+        
+        
 
     def __len__(self) -> int:
         return len(self.nerf_paths)
@@ -82,6 +88,26 @@ class Nerf2vecTrainer:
             num_workers=4,
             shuffle=True
         )
+        
+        input_dim = 3
+        hidden_dim = 512
+        num_hidden_layers_before_skip = 2
+        num_hidden_layers_after_skip = 2
+        out_dim = 4
+        """
+        decoder = ImplicitDecoder(
+            24,
+            input_dim,
+            hidden_dim,
+            num_hidden_layers_before_skip,
+            num_hidden_layers_after_skip,
+            out_dim,
+        )
+        self.decoder = decoder.cuda()
+        """
+        self.decoder = NGPradianceField(
+                **config.INSTANT_NGP_MLP_CONF
+        ).to(device)
 
         self.epoch = 0
     
@@ -100,6 +126,7 @@ class Nerf2vecTrainer:
             for batch in self.train_loader:
 
                 rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
+                # TODO: check rays, it is not created properly
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 pixels = pixels.cuda()
                 render_bkgds = render_bkgds.cuda()
@@ -118,5 +145,29 @@ class Nerf2vecTrainer:
                 # end = time.time()
                 # print(f'elapsed: {end-start}')
 
-                embeddings = self.encoder(matrices)
-                pred = self.decoder(embeddings, selected_coords)
+                #embeddings = self.encoder(matrices)
+                #pred = self.decoder(embeddings, selected_coords)
+                
+                render_n_samples = 1024
+                scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
+                render_step_size = (
+                    (scene_aabb[3:] - scene_aabb[:3]).max()
+                    * math.sqrt(3)
+                    / render_n_samples
+                ).item()
+                alpha_thre = 0.0
+
+                rgb, acc, depth, n_rendering_samples = render_image(
+                    self.decoder,
+                    grids,
+                    rays,
+                    config.AABB,
+                    # rendering options
+                    near_plane=None,
+                    far_plane=None,
+                    render_step_size=render_step_size,
+                    render_bkgd=render_bkgds,
+                    cone_angle=0.0,
+                    alpha_thre=alpha_thre
+                )
+

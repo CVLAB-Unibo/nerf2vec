@@ -28,6 +28,6 @@ for i in range(0, num_rays, chunk):
     
     print()
 
-b_t_origins = rays.origins[:, b_ray_indices]
+b_t_origins = chunk_rays.origins[:, b_ray_indices]
 
 print()
