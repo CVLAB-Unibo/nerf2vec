@@ -1,3 +1,4 @@
+import math
 import random
 from typing import Optional
 
@@ -6,7 +7,9 @@ import torch
 # from utils import Rays, namedtuple_map
 import collections
 
-from nerfacc import OccupancyGrid, ray_marching, rendering
+from nerfacc import ContractionType, OccupancyGrid, ray_marching, rendering
+
+from nerf.intant_ngp import NGPradianceField
 
 Rays = collections.namedtuple("Rays", ("origins", "viewdirs"))
 
@@ -23,15 +26,15 @@ def set_random_seed(seed):
 
 def render_image(
     # scene
-    radiance_field: torch.nn.Module,
-    occupancy_grid: OccupancyGrid,
-    rays: Rays,
+    radiance_field: torch.nn.Module,             # This should be the DECODER
+    occupancy_grid: OccupancyGrid,               # This should be [batch_size, grids]
+    rays: Rays,                                  # This should be [batch_size, rays]
     scene_aabb: torch.Tensor,
     # rendering options
     near_plane: Optional[float] = None,
     far_plane: Optional[float] = None,
     render_step_size: float = 1e-3,
-    render_bkgd: Optional[torch.Tensor] = None,
+    render_bkgd: Optional[torch.Tensor] = None,  # This should be [batch_size, render_bkgds]
     cone_angle: float = 0.0,
     alpha_thre: float = 0.0,
     # test options
@@ -87,6 +90,7 @@ def render_image(
         if radiance_field.training
         else test_chunk_size
     )
+    test = 5
     for i in range(0, num_rays, chunk):
         chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays)
         ray_indices, t_starts, t_ends = ray_marching(
@@ -122,5 +126,62 @@ def render_image(
         depths.view((*rays_shape[:-1], -1)),
         sum(n_rendering_samples),
     )
+
+
+def generate_occupancy_grid(
+        device, 
+        weights_path, 
+        nerf_dict, 
+        aabb, 
+        n_iterations, 
+        n_warmups):
+
+        radiance_field = NGPradianceField(
+                **nerf_dict
+            ).to(device)
+        
+        matrix = torch.load(weights_path)
+        radiance_field.load_state_dict(matrix)
+        radiance_field.eval()
+
+        # Create the OccupancyGrid
+        render_n_samples = 1024
+        grid_resolution = 128
+        
+        contraction_type = ContractionType.AABB
+        scene_aabb = torch.tensor(aabb, dtype=torch.float32, device=device)
+        near_plane = None
+        far_plane = None
+        render_step_size = (
+            (scene_aabb[3:] - scene_aabb[:3]).max()
+            * math.sqrt(3)
+            / render_n_samples
+        ).item()
+        alpha_thre = 0.0
+
+        occupancy_grid = OccupancyGrid(
+            roi_aabb=aabb,
+            resolution=grid_resolution,
+            contraction_type=contraction_type,
+        ).to(device)
+        occupancy_grid.eval()
+
+        with torch.no_grad():
+            for i in range(n_iterations):
+                def occ_eval_fn(x):
+                    step_size = render_step_size
+                    _ , density = radiance_field._query_density_and_rgb(x, None)
+                    return density * step_size
+
+                # update occupancy grid
+                occupancy_grid._update(
+                    step=i,
+                    occ_eval_fn=occ_eval_fn,
+                    occ_thre=1e-2,
+                    ema_decay=0.95,
+                    warmup_steps=n_warmups
+                )
+
+        return occupancy_grid
 
 

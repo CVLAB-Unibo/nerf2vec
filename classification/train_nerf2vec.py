@@ -14,8 +14,9 @@ from pathlib import Path
 from random import randint
 from typing import Any, Dict, Tuple
 
-from classification.ngp_nerf2vec import NGPradianceField
+from nerf.intant_ngp import NGPradianceField
 from classification import config
+from nerf.utils import generate_occupancy_grid
 
 class NeRFDataset(Dataset):
     def __init__(self, nerfs_root: str, sample_sd: Dict[str, Any], device: str) -> None:
@@ -76,88 +77,52 @@ class Nerf2vecTrainer:
         self.device = device
         
         self.train_loader = DataLoader(
-        train_dset,
-        batch_size=16,
-        num_workers=4,
-        shuffle=True
+            train_dset,
+            batch_size=16,
+            num_workers=4,
+            shuffle=True
         )
+
+        self.epoch = 0
     
     def train(self):
-        for batch in self.train_loader:
-            # pixels, color = batch
-            rays, pixels, render_bkgd, matrix, nerf_weights_path = batch
+        num_epochs = config.NUM_EPOCHS
+        start_epoch = self.epoch
 
-            # Move tensors to CUDA 
-            start = time.time()
-            rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
-            pixels = pixels.cuda()
-            render_bkgd = render_bkgd.cuda()
-            matrix = matrix.cuda()
+        for epoch in range(start_epoch, num_epochs):
 
-            end = time.time()
-            print(f'moving tensor to CUDA: {end-start}')
+            self.epoch = epoch
+            # self.encoder.train()
+            # self.decoder.train()
 
-            grids = []
-            start = time.time()
-            for elem in nerf_weights_path:
-                grid = self._generate_occupancy_grid(self.device, elem)
-                grids.append(grid)
-            end = time.time()
-            print(f'elapsed: {end-start}')
+            desc = f"Epoch {epoch}/{num_epochs}"
+
+            for batch in self.train_loader:
+
+                rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
+                rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
+                pixels = pixels.cuda()
+                render_bkgds = render_bkgds.cuda()
+                matrices = matrices.cuda()
+
+                grids = []
+                # start = time.time()
+                for elem in nerf_weights_path:
+                    grid = generate_occupancy_grid(self.device, 
+                                                elem, 
+                                                config.INSTANT_NGP_MLP_CONF, 
+                                                config.AABB, 
+                                                config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
+                                                config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
+                    grids.append(grid)
+                # end = time.time()
+                # print(f'elapsed: {end-start}')
+
+                embeddings = self.encoder(matrices)
+                pred = self.decoder(embeddings, selected_coords)
+
+
+
+
     
-    def _generate_occupancy_grid(self, device, nerf_weights_path):
-
-        radiance_field = NGPradianceField(
-                aabb=config.AABB,
-                unbounded=False,
-                encoding='Frequency',
-                mlp='FullyFusedMLP',
-                activation='ReLU',
-                n_hidden_layers=config.MLP_HIDDEN_LAYERS,
-                n_neurons=config.MLP_UNITS,
-                encoding_size=config.MLP_ENCODING_SIZE
-            ).to(device)
-        
-        matrix = torch.load(nerf_weights_path)
-        radiance_field.load_state_dict(matrix)
-        radiance_field.eval()
-
-        # Create the OccupancyGrid
-        render_n_samples = 1024
-        grid_resolution = 128
-        
-        contraction_type = ContractionType.AABB
-        scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=device)
-        near_plane = None
-        far_plane = None
-        render_step_size = (
-            (scene_aabb[3:] - scene_aabb[:3]).max()
-            * math.sqrt(3)
-            / render_n_samples
-        ).item()
-        alpha_thre = 0.0
-
-        occupancy_grid = OccupancyGrid(
-            roi_aabb=config.AABB,
-            resolution=grid_resolution,
-            contraction_type=contraction_type,
-        ).to(device)
-        occupancy_grid.eval()
-
-        with torch.no_grad():
-            for i in range(config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS):
-                def occ_eval_fn(x):
-                    step_size = render_step_size
-                    _ , density = radiance_field._query_density_and_rgb(x, None)
-                    return density * step_size
-
-                # update occupancy grid
-                occupancy_grid._update(
-                    step=i,
-                    occ_eval_fn=occ_eval_fn,
-                    occ_thre=1e-2,
-                    ema_decay=0.95,
-                    warmup_steps=config.OCCUPANCY_GRID_WARMUP_ITERATIONS
-                )
-
-        return occupancy_grid
+    
