@@ -8,8 +8,6 @@ import torch.nn.functional as F
 from classification.utils import render_image
 from nerf.utils import Rays
 
-
-
 def get_translation_t(t):
     """Get the translation matrix for movement in t."""
     matrix = [

@@ -2,7 +2,7 @@ import math
 import time
 
 from nerfacc import ContractionType, OccupancyGrid
-from nerf.utils import get_mlp_params_as_matrix, next_multiple
+from classification.utils import get_mlp_params_as_matrix, next_multiple
 
 import os
 import torch

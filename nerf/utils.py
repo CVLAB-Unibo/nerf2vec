@@ -1,66 +1,126 @@
-from collections import OrderedDict
-import collections
-from typing import Any, Dict
-from torch import Tensor
+import random
+from typing import Optional
+
+import numpy as np
 import torch
+# from utils import Rays, namedtuple_map
+import collections
 
-from classification import config
-
-
-def next_multiple(val, divisor):
-    """
-    Implementation ported directly from TinyCuda implementation
-    See https://github.com/NVlabs/tiny-cuda-nn/blob/master/include/tiny-cuda-nn/common.h#L300
-    """
-    return next_pot(div_round_up(val, divisor) * divisor)
-
-
-def div_round_up(val, divisor):
-	return next_pot((val + divisor - 1) / divisor)
-
-
-def next_pot(v):
-    v=int(v)
-    v-=1
-    v | v >> 1
-    v | v >> 2
-    v | v >> 4
-    v | v >> 8
-    v | v >> 16
-    return v+1
-
-
-def next_multiple_2(val, divisor):
-    """
-    Additional implementation added for testing purposes
-    """
-    return ((val - 1) | (divisor -1)) + 1
-
-
-def get_mlp_params_as_matrix(flattened_params: Tensor, sd: Dict[str, Any] = None) -> Tensor:
-
-    if sd is None:
-         sd = get_mlp_sample_sd()
-
-    params_shapes = [p.shape for p in sd.values()]
-    feat_dim = params_shapes[0][0]
-    start = params_shapes[0].numel() #+ params_shapes[1].numel()
-    end = params_shapes[-1].numel() #+ params_shapes[-2].numel()
-    params = flattened_params[start:-end]
-    return params.reshape((-1, feat_dim))
-
-def get_mlp_sample_sd():
-    sample_sd = OrderedDict()
-    sample_sd['input'] = torch.zeros(config.MLP_UNITS, next_multiple(config.MLP_INPUT_SIZE_AFTER_ENCODING, config.TINY_CUDA_MIN_SIZE))
-    for i in range(config.MLP_HIDDEN_LAYERS):
-        sample_sd[f'hid_{i}'] = torch.zeros(config.MLP_UNITS, config.MLP_UNITS)
-    sample_sd['output'] = torch.zeros(next_multiple(config.MLP_OUTPUT_SIZE, config.TINY_CUDA_MIN_SIZE), config.MLP_UNITS)
-
-    return sample_sd
-
+from nerfacc import OccupancyGrid, ray_marching, rendering
 
 Rays = collections.namedtuple("Rays", ("origins", "viewdirs"))
 
 def namedtuple_map(fn, tup):
     """Apply `fn` to each element of `tup` and cast to `tup`'s namedtuple."""
     return type(tup)(*(None if x is None else fn(x) for x in tup))
+
+
+def set_random_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
+def render_image(
+    # scene
+    radiance_field: torch.nn.Module,
+    occupancy_grid: OccupancyGrid,
+    rays: Rays,
+    scene_aabb: torch.Tensor,
+    # rendering options
+    near_plane: Optional[float] = None,
+    far_plane: Optional[float] = None,
+    render_step_size: float = 1e-3,
+    render_bkgd: Optional[torch.Tensor] = None,
+    cone_angle: float = 0.0,
+    alpha_thre: float = 0.0,
+    # test options
+    test_chunk_size: int = 8192,
+    # only useful for dnerf
+    timestamps: Optional[torch.Tensor] = None,
+):
+    """Render the pixels of an image."""
+    rays_shape = rays.origins.shape
+    if len(rays_shape) == 3:
+        height, width, _ = rays_shape
+        num_rays = height * width
+        rays = namedtuple_map(
+            lambda r: r.reshape([num_rays] + list(r.shape[2:])), rays
+        )
+    else:
+        num_rays, _ = rays_shape
+
+    def sigma_fn(t_starts, t_ends, ray_indices):
+        t_origins = chunk_rays.origins[ray_indices]
+        t_dirs = chunk_rays.viewdirs[ray_indices]
+        positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+        if timestamps is not None:
+            # dnerf
+            t = (
+                timestamps[ray_indices]
+                if radiance_field.training
+                else timestamps.expand_as(positions[:, :1])
+            )
+            return radiance_field.query_density(positions, t)
+        
+        _, density = radiance_field._query_density_and_rgb(positions, None)
+        return density
+        
+
+    def rgb_sigma_fn(t_starts, t_ends, ray_indices):
+        t_origins = chunk_rays.origins[ray_indices]
+        t_dirs = chunk_rays.viewdirs[ray_indices]
+        positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+        if timestamps is not None:
+            # dnerf
+            t = (
+                timestamps[ray_indices]
+                if radiance_field.training
+                else timestamps.expand_as(positions[:, :1])
+            )
+            return radiance_field(positions, t, t_dirs)
+        return radiance_field(positions, t_dirs)
+
+    results = []
+    chunk = (
+        torch.iinfo(torch.int32).max
+        if radiance_field.training
+        else test_chunk_size
+    )
+    for i in range(0, num_rays, chunk):
+        chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays)
+        ray_indices, t_starts, t_ends = ray_marching(
+            chunk_rays.origins,
+            chunk_rays.viewdirs,
+            scene_aabb=scene_aabb,
+            grid=occupancy_grid,
+            sigma_fn=sigma_fn,
+            near_plane=near_plane,
+            far_plane=far_plane,
+            render_step_size=render_step_size,
+            stratified=radiance_field.training,
+            cone_angle=cone_angle,
+            alpha_thre=alpha_thre,
+        )
+        rgb, opacity, depth = rendering(
+            t_starts,
+            t_ends,
+            ray_indices,
+            n_rays=chunk_rays.origins.shape[0],
+            rgb_sigma_fn=rgb_sigma_fn,
+            render_bkgd=render_bkgd,
+        )
+        chunk_results = [rgb, opacity, depth, len(t_starts)]
+        results.append(chunk_results)
+    colors, opacities, depths, n_rendering_samples = [
+        torch.cat(r, dim=0) if isinstance(r[0], torch.Tensor) else r
+        for r in zip(*results)
+    ]
+    return (
+        colors.view((*rays_shape[:-1], -1)),
+        opacities.view((*rays_shape[:-1], -1)),
+        depths.view((*rays_shape[:-1], -1)),
+        sum(n_rendering_samples),
+    )
+
+
