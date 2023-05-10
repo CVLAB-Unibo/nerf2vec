@@ -6,6 +6,7 @@ from classification.utils import get_mlp_params_as_matrix, next_multiple
 
 import os
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from models.idecoder import ImplicitDecoder
 
@@ -110,6 +111,7 @@ class Nerf2vecTrainer:
     def train(self):
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
+        step = 0
 
         for epoch in range(start_epoch, num_epochs):
 
@@ -120,6 +122,8 @@ class Nerf2vecTrainer:
             desc = f"Epoch {epoch}/{num_epochs}"
 
             for batch in self.train_loader:
+                
+                step+=1
 
                 rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 # TODO: check rays, it is not created properly
@@ -170,6 +174,21 @@ class Nerf2vecTrainer:
                 )
 
                 # TODO: evaluate whether to add this condition or not
-                if n_rendering_samples == 0:
+                if 0 in n_rendering_samples:
                     continue
+
+                alive_ray_mask = acc.squeeze(-1) > 0
+
+                # compute loss
+                loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
+
+                INTERVAL = 100
+                if step % INTERVAL == 0:
+
+                    # elapsed_time = time.time() - tic
+                    loss = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
+                    print(f'loss={loss:.5f}')
+
+
+
 

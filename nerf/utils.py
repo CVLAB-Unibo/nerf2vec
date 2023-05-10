@@ -83,7 +83,10 @@ def render_image(
         
 
     def rgb_sigma_fn(t_starts, t_ends, ray_indices):
-        
+        _ = t_starts
+        _ = t_ends
+        _ = ray_indices
+
         rgb, sigmas = curr_rgb[curr_batch_idx], curr_sigmas[curr_batch_idx]
         return rgb, sigmas
 
@@ -112,14 +115,18 @@ def render_image(
         b_t_ends = []
         b_ray_indices = []
 
+        # Compute the positions for all the element in the batch.
+        # These position will be used for calling the decoder.
         for batch_idx in range(batch_size):
 
             """
             The ray_marching internally calls sigma_fn that, for the moment, has not be used.
             This because:
-             - it is an optimization that, hopefully, can be skipped
-             - it requires the value 'packed_info', which returned from the ray marching algorithm, and not exposed to external callers.
+             - it is an optimization that, hopefully, can be skipped. By testing some models, it seems that they can be trained also without it.
+             - it requires the value 'packed_info', which is returned from the ray marching algorithm, and it is not exposed to external callers.
             See the ray_marching.py file, at the end it uses this variable.
+
+            Moreover, this avoids an additional call to the model (i.e., the nerf2vec decoder)
             """
             ray_indices, t_starts, t_ends = ray_marching(
                 chunk_rays.origins[batch_idx],  # [batch_size, chunk, 3d coord]
@@ -135,10 +142,6 @@ def render_image(
                 alpha_thre=alpha_thre,
             )
 
-            # Add the variables to three different arrays, that keep in consideration the batch size
-            # b_ray_indices[batch_idx] = ray_indices  
-            # b_t_starts[batch_idx] = t_starts
-            # b_t_ends[batch_idx] = t_ends
             b_t_starts.append(t_starts)
             b_t_ends.append(t_ends)
             b_ray_indices.append(ray_indices)
@@ -148,12 +151,13 @@ def render_image(
             positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
             b_positions.append(positions)
 
-        # Get the minimum size among all tensors, so as to have a tensor that can be passed to the decoder
+        # Get the minimum size among all tensors, so as to have a tensor that can be passed to the decoder 
+        # (i.e., all tensors will have the same dimensions)
         MIN_SIZE = min([tensor.size(0) for tensor in b_positions])
-        b_positions_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
-        b_t_starts_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
-        b_t_ends_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
-        b_ray_indices_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
+        b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
+        b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
+        b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
+        b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
 
         # _, sigmas = radiance_field(embeddings, b_positions_truncated)
         #assert (
@@ -165,30 +169,31 @@ def render_image(
         # VOLUME RENDERING
         # ################################################################################
 
-        curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions_truncated)
+        curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions)
         
 
         for curr_batch_idx in range(batch_size):
             rgb, opacity, depth = rendering(
-                b_t_starts_truncated[curr_batch_idx],
-                b_t_ends_truncated[curr_batch_idx],
-                b_ray_indices_truncated[curr_batch_idx],
-                n_rays=MIN_SIZE,
+                b_t_starts[curr_batch_idx],
+                b_t_ends[curr_batch_idx],
+                b_ray_indices[curr_batch_idx],
+                n_rays=num_rays,
                 rgb_sigma_fn=rgb_sigma_fn,
                 render_bkgd=render_bkgd[curr_batch_idx],
             )
-            chunk_results = [rgb, opacity, depth, len(t_starts)]
+            chunk_results = [rgb, opacity, depth, len(b_t_starts[curr_batch_idx])]
             results.append(chunk_results)
 
     colors, opacities, depths, n_rendering_samples = [
         torch.cat(r, dim=0) if isinstance(r[0], torch.Tensor) else r
         for r in zip(*results)
     ]
+
     return (
         colors.view((*rays_shape[:-1], -1)),
         opacities.view((*rays_shape[:-1], -1)),
         depths.view((*rays_shape[:-1], -1)),
-        sum(n_rendering_samples),
+        n_rendering_samples,
     )
 
 
