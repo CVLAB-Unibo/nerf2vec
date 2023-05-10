@@ -149,8 +149,8 @@ class Nerf2vecTrainer:
     def train(self):
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
-        step = 0
 
+        start = time.time()
         for epoch in range(start_epoch, num_epochs):
 
             self.epoch = epoch
@@ -160,8 +160,6 @@ class Nerf2vecTrainer:
             desc = f"Epoch {epoch}/{num_epochs}"
 
             for batch in self.train_loader:
-                
-                step+=1
 
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds = batch
@@ -177,7 +175,7 @@ class Nerf2vecTrainer:
                 
 
                 grids = []
-                # start = time.time()
+                
                 for elem in nerf_weights_path:
                     grid = generate_occupancy_grid(self.device, 
                                                 elem, 
@@ -243,8 +241,10 @@ class Nerf2vecTrainer:
                     print(f'loss={loss:.5f}')
                 """
 
-                if self.global_step % 10 == 0:
-                    self.logfn({"train/loss": loss.item()})
+                if self.global_step % 100 == 0:
+                    end = time.time()
+                    # self.logfn(f'"train/loss": {loss.item()} - elapsed: {end-start}')
+                    print(f'"train/loss": {loss.item()} - elapsed: {end-start}')
 
 
                     self.encoder.eval()
@@ -284,6 +284,7 @@ class Nerf2vecTrainer:
 
                     self.encoder.train()
                     self.decoder.train()
+                    start = time.time()
                         
 
 
