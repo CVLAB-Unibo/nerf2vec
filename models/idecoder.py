@@ -36,19 +36,22 @@ class ImplicitDecoder(nn.Module):
         num_hidden_layers_before_skip: int,
         num_hidden_layers_after_skip: int,
         out_dim: int,
-        encoding_conf: dict,
-        aabb: Union[torch.Tensor, List[float]]
+        encoding_conf: dict,  # Added for NerfAcc
+        aabb: Union[torch.Tensor, List[float]]  # Added for NerfAcc
     ) -> None:
         super().__init__()
 
         self.coords_enc = CoordsEncoder(encoding_conf=encoding_conf, input_dims=in_dim)
         coords_dim = self.coords_enc.out_dim
 
+        # ################################################################################
         # Added for NerfAcc
+        # ################################################################################
         trunc_exp = _TruncExp.apply
         self.density_activation = lambda x: trunc_exp(x - 1)
         self.aabb = aabb
         self.in_dim = in_dim
+        # ################################################################################
 
         self.in_layer = nn.Sequential(nn.Linear(embed_dim + coords_dim, hidden_dim), nn.ReLU())
 
@@ -67,12 +70,14 @@ class ImplicitDecoder(nn.Module):
 
     def forward(self, embeddings: Tensor, coords: Tensor) -> Tensor:
         
+        # ################################################################################
         # Added for NerfAcc
+        # ################################################################################
         aabb_min, aabb_max = torch.split(self.aabb, self.in_dim, dim=-1)
         coords = (coords - aabb_min) / (aabb_max - aabb_min)
         selector = ((coords > 0.0) & (coords < 1.0)).all(dim=-1)
+        # ################################################################################
 
-        # Original inr2vec implementation
         coords = self.coords_enc.embed(coords)
 
         repeated_embeddings = repeat(embeddings, "b d -> b n d", n=coords.shape[1])
@@ -86,8 +91,11 @@ class ImplicitDecoder(nn.Module):
         x = x + inp_proj
 
         x = self.after_skip(x)
+        # return x.squeeze(-1) # ORIGINAL INR2VEC IMPLEMENTATION
 
+        # ################################################################################
         # Added for NerfAcc
+        # ################################################################################
         rgb, density_before_activation = x[..., :3], x[..., 3]
         density_before_activation = density_before_activation[:, :, None]
 
@@ -100,7 +108,5 @@ class ImplicitDecoder(nn.Module):
         rgb = torch.nn.Sigmoid()(rgb)
 
         return rgb, density
+        # ################################################################################
 
-
-
-        # return x.squeeze(-1)

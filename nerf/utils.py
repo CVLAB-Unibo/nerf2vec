@@ -7,9 +7,11 @@ import torch
 # from utils import Rays, namedtuple_map
 import collections
 
-from nerfacc import ContractionType, OccupancyGrid, ray_marching, rendering
+from nerfacc import ContractionType, OccupancyGrid, ray_marching, render_visibility, rendering
 
 from nerf.intant_ngp import NGPradianceField
+
+import nerfacc.cuda as _C
 
 Rays = collections.namedtuple("Rays", ("origins", "viewdirs"))
 
@@ -81,18 +83,9 @@ def render_image(
         
 
     def rgb_sigma_fn(t_starts, t_ends, ray_indices):
-        t_origins = chunk_rays.origins[ray_indices]
-        t_dirs = chunk_rays.viewdirs[ray_indices]
-        positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
-        if timestamps is not None:
-            # dnerf
-            t = (
-                timestamps[ray_indices]
-                if radiance_field.training
-                else timestamps.expand_as(positions[:, :1])
-            )
-            return radiance_field(positions, t, t_dirs)
-        return radiance_field(positions, t_dirs)
+        
+        rgb, sigmas = curr_rgb[curr_batch_idx], curr_sigmas[curr_batch_idx]
+        return rgb, sigmas
 
     results = []
     chunk = (
@@ -115,7 +108,19 @@ def render_image(
         """
 
         b_positions = []
+        b_t_starts = []
+        b_t_ends = []
+        b_ray_indices = []
+
         for batch_idx in range(batch_size):
+
+            """
+            The ray_marching internally calls sigma_fn that, for the moment, has not be used.
+            This because:
+             - it is an optimization that, hopefully, can be skipped
+             - it requires the value 'packed_info', which returned from the ray marching algorithm, and not exposed to external callers.
+            See the ray_marching.py file, at the end it uses this variable.
+            """
             ray_indices, t_starts, t_ends = ray_marching(
                 chunk_rays.origins[batch_idx],  # [batch_size, chunk, 3d coord]
                 chunk_rays.viewdirs[batch_idx], # [batch_size, chunk, 3d coord]
@@ -134,6 +139,9 @@ def render_image(
             # b_ray_indices[batch_idx] = ray_indices  
             # b_t_starts[batch_idx] = t_starts
             # b_t_ends[batch_idx] = t_ends
+            b_t_starts.append(t_starts)
+            b_t_ends.append(t_ends)
+            b_ray_indices.append(ray_indices)
             
             t_origins = chunk_rays.origins[batch_idx][ray_indices]
             t_dirs = chunk_rays.viewdirs[batch_idx][ray_indices]
@@ -143,54 +151,35 @@ def render_image(
         # Get the minimum size among all tensors, so as to have a tensor that can be passed to the decoder
         MIN_SIZE = min([tensor.size(0) for tensor in b_positions])
         b_positions_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
+        b_t_starts_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
+        b_t_ends_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
+        b_ray_indices_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
 
-        """
-        b_t_origins = chunk_rays.origins[:, b_ray_indices]
-        b_t_dirs = chunk_rays.viewdirs[:, b_ray_indices]
-        b_positions = b_t_origins + b_t_dirs * (b_t_starts + b_t_ends) / 2.0
-        """
+        # _, sigmas = radiance_field(embeddings, b_positions_truncated)
+        #assert (
+        #    sigmas.shape == t_starts.shape
+        #), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
+        # alphas = 1.0 - torch.exp(-sigmas * (b_t_ends_truncated - b_t_starts_truncated))
 
-        # __D Positions must have shape [batch_size, chunk, 3d_coord]
-        # _, sigmas = radiance_field._query_density_and_rgb(b_positions_truncated, None)
+        # ################################################################################
+        # VOLUME RENDERING
+        # ################################################################################
 
-        _, sigmas = radiance_field(embeddings, b_positions_truncated)
+        curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions_truncated)
+        
 
-        print()
-        assert (
-            sigmas.shape == t_starts.shape
-        ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
-        alphas = 1.0 - torch.exp(-sigmas * (t_ends - t_starts))
+        for curr_batch_idx in range(batch_size):
+            rgb, opacity, depth = rendering(
+                b_t_starts_truncated[curr_batch_idx],
+                b_t_ends_truncated[curr_batch_idx],
+                b_ray_indices_truncated[curr_batch_idx],
+                n_rays=MIN_SIZE,
+                rgb_sigma_fn=rgb_sigma_fn,
+                render_bkgd=render_bkgd[curr_batch_idx],
+            )
+            chunk_results = [rgb, opacity, depth, len(t_starts)]
+            results.append(chunk_results)
 
-        """
-        # Compute visibility of the samples, and filter out invisible samples
-        masks = render_visibility(
-            alphas,
-            ray_indices=ray_indices,
-            packed_info=packed_info,
-            early_stop_eps=early_stop_eps,
-            alpha_thre=alpha_thre,
-            n_rays=rays_o.shape[0],
-        )
-        ray_indices, t_starts, t_ends = (
-            ray_indices[masks],
-            t_starts[masks],
-            t_ends[masks],
-        )
-        """
-
-
-
-
-        rgb, opacity, depth = rendering(
-            t_starts,
-            t_ends,
-            ray_indices,
-            n_rays=chunk_rays.origins.shape[0],
-            rgb_sigma_fn=rgb_sigma_fn,
-            render_bkgd=render_bkgd,
-        )
-        chunk_results = [rgb, opacity, depth, len(t_starts)]
-        results.append(chunk_results)
     colors, opacities, depths, n_rendering_samples = [
         torch.cat(r, dim=0) if isinstance(r[0], torch.Tensor) else r
         for r in zip(*results)
