@@ -27,11 +27,6 @@ class NeRFDataset(Dataset):
 
         self.device = device
 
-
-        
-        
-        
-
     def __len__(self) -> int:
         return len(self.nerf_paths)
 
@@ -84,8 +79,8 @@ class Nerf2vecTrainer:
         
         self.train_loader = DataLoader(
             train_dset,
-            batch_size=16,
-            num_workers=4,
+            batch_size=4,#16,
+            num_workers=0,#4,
             shuffle=True
         )
         
@@ -161,7 +156,7 @@ class Nerf2vecTrainer:
                     self.decoder,
                     grids,
                     rays,
-                    config.AABB,
+                    scene_aabb,
                     # rendering options
                     near_plane=None,
                     far_plane=None,
@@ -170,4 +165,8 @@ class Nerf2vecTrainer:
                     cone_angle=0.0,
                     alpha_thre=alpha_thre
                 )
+
+                # TODO: evaluate whether to add this condition or not
+                if n_rendering_samples == 0:
+                    continue
 

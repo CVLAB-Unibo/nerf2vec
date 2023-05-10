@@ -106,12 +106,14 @@ def render_image(
         # chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays)
         chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)  # Add the batch size
 
+        """
         tensor_size = chunk if num_rays >= chunk else num_rays
         b_ray_indices = torch.zeros(batch_size, 1)
         b_t_starts = torch.zeros(batch_size, tensor_size, 1)
         b_t_ends = torch.zeros(batch_size, tensor_size, 1)
+        """
 
-
+        b_positions = []
         for batch_idx in range(batch_size):
             ray_indices, t_starts, t_ends = ray_marching(
                 chunk_rays.origins[batch_idx],  # [batch_size, chunk, 3d coord]
@@ -128,16 +130,28 @@ def render_image(
             )
 
             # Add the variables to three different arrays, that keep in consideration the batch size
-            b_ray_indices[batch_idx] = ray_indices  
-            b_t_starts[batch_idx] = t_starts
-            b_t_ends[batch_idx] = t_ends
-        
+            # b_ray_indices[batch_idx] = ray_indices  
+            # b_t_starts[batch_idx] = t_starts
+            # b_t_ends[batch_idx] = t_ends
+            
+            t_origins = chunk_rays.origins[batch_idx][ray_indices]
+            t_dirs = chunk_rays.viewdirs[batch_idx][ray_indices]
+            positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+            b_positions.append(positions)
+
+        # Get the minimum size among all tensors, so as to have a tensor that can be passed to the decoder
+        MIN_SIZE = min([tensor.size(0) for tensor in b_positions])
+        b_positions_truncated = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
+
+        """
         b_t_origins = chunk_rays.origins[:, b_ray_indices]
         b_t_dirs = chunk_rays.viewdirs[:, b_ray_indices]
         b_positions = b_t_origins + b_t_dirs * (b_t_starts + b_t_ends) / 2.0
+        """
 
         # __D Positions must have shape [batch_size, chunk, 3d_coord]
-        _, sigmas = radiance_field._query_density_and_rgb(b_positions, None)
+        _, sigmas = radiance_field._query_density_and_rgb(b_positions_truncated, None)
+        print()
         assert (
             sigmas.shape == t_starts.shape
         ), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
