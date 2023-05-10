@@ -1,33 +1,56 @@
 import torch
 from nerf.utils import Rays, namedtuple_map
+from typing import Callable, Tuple
+from torch import Tensor, nn
 
+class CoordsEncoder:
+    def __init__(
+        self,
+        input_dims: int = 3,
+        include_input: bool = True,
+        max_freq_log2: int = 9,
+        num_freqs: int = 10,
+        log_sampling: bool = True,
+        periodic_fns: Tuple[Callable, Callable] = (torch.sin, torch.cos),
+    ) -> None:
+        self.input_dims = input_dims
+        self.include_input = include_input
+        self.max_freq_log2 = max_freq_log2
+        self.num_freqs = num_freqs
+        self.log_sampling = log_sampling
+        self.periodic_fns = periodic_fns
+        self.create_embedding_fn()
 
-origins = torch.rand(5, 20, 3) # batch_size, n_rays, coordinate
-viewdirs = torch.rand(5, 20, 3) # batch_size, n_rays, coordinate
+    def create_embedding_fn(self) -> None:
+        embed_fns = []
+        d = self.input_dims
+        out_dim = 0
+        if self.include_input:
+            embed_fns.append(lambda x: x)
+            out_dim += d
 
-rays = Rays(origins=origins, viewdirs=viewdirs)
-chunk = torch.iinfo(torch.int32).max
-chunk = 5
+        if self.log_sampling:
+            freq_bands = 2.0 ** torch.linspace(0.0, self.max_freq_log2, steps=self.num_freqs)
+        else:
+            freq_bands = torch.linspace(2.0**0.0, 2.0**self.max_freq_log2, steps=self.num_freqs)
 
-rays_shape = rays.origins.shape
-batch_size, num_rays, coordinates = rays_shape
+        for freq in freq_bands:
+            for p_fn in self.periodic_fns:
+                embed_fns.append(lambda x, p_fn=p_fn, freq=freq: p_fn(x * freq))
+                out_dim += d
 
+        self.embed_fns = embed_fns
+        self.out_dim = out_dim
 
-b_ray_indices = torch.zeros(batch_size, 1, dtype=torch.int32)
-b_t_starts = torch.zeros(batch_size, chunk, 1)
-b_t_ends = torch.zeros(batch_size, chunk, 1)
-
-b_ray_indices[0] = 1
-b_ray_indices[1] = 2
-b_ray_indices[2] = 3
-b_ray_indices[3] = 4
-b_ray_indices[4] = 5
-
-for i in range(0, num_rays, chunk):
-    chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)
+    def embed(self, inputs: Tensor) -> Tensor:
+        return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
     
-    print()
 
-b_t_origins = chunk_rays.origins[:, b_ray_indices]
+in_dim = 3
+coords_enc = CoordsEncoder(in_dim)
+coords_dim = coords_enc.out_dim
+
+
+torch.random(4, 3)
 
 print()

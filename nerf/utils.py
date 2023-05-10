@@ -27,6 +27,7 @@ def set_random_seed(seed):
 def render_image(
     # scene
     radiance_field: torch.nn.Module,             # This should be the DECODER
+    embeddings: torch.Tensor,
     occupancy_grid: OccupancyGrid,               # This should be [batch_size, grids]
     rays: Rays,                                  # This should be [batch_size, rays]
     scene_aabb: torch.Tensor,
@@ -150,7 +151,10 @@ def render_image(
         """
 
         # __D Positions must have shape [batch_size, chunk, 3d_coord]
-        _, sigmas = radiance_field._query_density_and_rgb(b_positions_truncated, None)
+        # _, sigmas = radiance_field._query_density_and_rgb(b_positions_truncated, None)
+
+        _, sigmas = radiance_field(embeddings, b_positions_truncated)
+
         print()
         assert (
             sigmas.shape == t_starts.shape

@@ -29,6 +29,11 @@ INSTANT_NGP_MLP_CONF = {
     'encoding_size':MLP_ENCODING_SIZE
 }
 
+INSTANT_NGP_ENCODING_CONF = {
+    "otype": "Frequency",
+    "n_frequencies": 24
+}
+
 # 
 # TINY-CUDA
 #
@@ -38,3 +43,4 @@ TINY_CUDA_MIN_SIZE = 16
 # TRAIN
 #
 NUM_EPOCHS = 150
+BATCH_SIZE = 4

@@ -79,7 +79,7 @@ class Nerf2vecTrainer:
         
         self.train_loader = DataLoader(
             train_dset,
-            batch_size=4,#16,
+            batch_size=config.BATCH_SIZE,#16,
             num_workers=0,#4,
             shuffle=True
         )
@@ -89,21 +89,22 @@ class Nerf2vecTrainer:
         num_hidden_layers_before_skip = 2
         num_hidden_layers_after_skip = 2
         out_dim = 4
-        """
+        embedding_dim = 1024
+
+
+        
         decoder = ImplicitDecoder(
-            24,
-            input_dim,
-            hidden_dim,
-            num_hidden_layers_before_skip,
-            num_hidden_layers_after_skip,
-            out_dim,
+            embed_dim=embedding_dim,
+            in_dim=input_dim,
+            hidden_dim=hidden_dim,
+            num_hidden_layers_before_skip=num_hidden_layers_before_skip,
+            num_hidden_layers_after_skip=num_hidden_layers_after_skip,
+            out_dim=out_dim,
+            encoding_conf=config.INSTANT_NGP_ENCODING_CONF,
+            aabb=torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
         )
         self.decoder = decoder.cuda()
-        """
-        self.decoder = NGPradianceField(
-                **config.INSTANT_NGP_MLP_CONF
-        ).to(device)
-
+        
         self.epoch = 0
     
     def train(self):
@@ -142,6 +143,7 @@ class Nerf2vecTrainer:
 
                 #embeddings = self.encoder(matrices)
                 #pred = self.decoder(embeddings, selected_coords)
+                embeddings = torch.rand(config.BATCH_SIZE, 1024).cuda() # TODO: This is the output of the encoder!
                 
                 render_n_samples = 1024
                 scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
@@ -154,6 +156,7 @@ class Nerf2vecTrainer:
 
                 rgb, acc, depth, n_rendering_samples = render_image(
                     self.decoder,
+                    embeddings,
                     grids,
                     rays,
                     scene_aabb,
