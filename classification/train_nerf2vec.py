@@ -3,6 +3,7 @@ import time
 import imageio
 
 from nerfacc import ContractionType, OccupancyGrid
+import tqdm
 from classification.utils import get_mlp_params_as_matrix, next_multiple
 
 import os
@@ -45,6 +46,7 @@ class NeRFDataset(Dataset):
             num_rays=config.NUM_RAYS,
             device=self.device,
             **dataset_kwargs)
+        nerf_loader.training = True
 
         # Get data for the batch
         data = nerf_loader[0]
@@ -55,7 +57,16 @@ class NeRFDataset(Dataset):
         matrix = torch.load(nerf_loader.weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
         
-        return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path
+
+        nerf_loader.training = False
+        # Get data for the batch
+        test_data = nerf_loader[0]
+        test_render_bkgd = test_data["color_bkgd"]
+        test_rays = test_data["rays"]
+        test_pixels = test_data["pixels"]
+
+
+        return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd
     
     
     def _get_nerf_paths(self, nerfs_root: str):
@@ -152,12 +163,18 @@ class Nerf2vecTrainer:
                 
                 step+=1
 
-                rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
+                # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
+                rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds = batch
                 # TODO: check rays, it is not created properly
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 pixels = pixels.cuda()
                 render_bkgds = render_bkgds.cuda()
                 matrices = matrices.cuda()
+
+                test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
+                test_pixels = test_pixels.cuda()
+                test_render_bkgds = test_render_bkgds.cuda()
+                
 
                 grids = []
                 # start = time.time()
@@ -229,17 +246,45 @@ class Nerf2vecTrainer:
                 if self.global_step % 10 == 0:
                     self.logfn({"train/loss": loss.item()})
 
-                # TOOD: call this while in eval mode!
-                """
-                imageio.imwrite(
-                            "acc_binary_test.png",
-                            ((acc.cpu().detach().numpy()[0] > 0).float().cpu().numpy() * 255).astype(np.uint8),
-                )
-                imageio.imwrite(
-                    "rgb_test.png",
-                    (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
-                )
-                """
+
+                    self.encoder.eval()
+                    self.decoder.eval()
+                    # for i in tqdm.tqdm(range(len(self.TEMP_nerf_loader))):
+                    #data = self.TEMP_nerf_loader[i]
+                    #render_bkgd = data["color_bkgd"]
+                    #rays = data["rays"]
+                    #pixels = data["pixels"]
+
+                    rgb, acc, depth, n_rendering_samples = render_image(
+                        self.decoder,
+                        embeddings,
+                        grids,
+                        test_rays,
+                        scene_aabb,
+                        # rendering options
+                        near_plane=None,
+                        far_plane=None,
+                        render_step_size=render_step_size,
+                        render_bkgd=test_render_bkgds,
+                        cone_angle=0.0,
+                        alpha_thre=alpha_thre
+                    )
+
+                    imageio.imwrite(
+                        os.path.join('temp_sanity_check', f'rgb_test_{self.global_step}.png'),
+                        (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
+                    )
+                    """
+                    imageio.imwrite(
+                                "acc_binary_test.png",
+                                ((acc.cpu().detach().numpy()[0] > 0).float().cpu().numpy() * 255).astype(np.uint8),
+                    )
+                    """
+                    
+
+                    self.encoder.train()
+                    self.decoder.train()
+                        
 
 
                 self.global_step += 1

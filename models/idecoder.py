@@ -70,6 +70,15 @@ class ImplicitDecoder(nn.Module):
 
     def forward(self, embeddings: Tensor, coords: Tensor) -> Tensor:
         
+
+        # Sometimes the ray march algorithm calls the model with an input with 0 length.
+        # The CutlassMLP crashes in these cases, therefore this fix has been applied.
+        batch_size, n_coords, _ = coords.size()
+        if n_coords == 0:
+            rgb = torch.zeros([batch_size, 0, 3], device=coords.device)
+            density = torch.zeros([batch_size, 0, 1], device=coords.device)
+            return rgb, density
+
         # ################################################################################
         # Added for NerfAcc
         # ################################################################################

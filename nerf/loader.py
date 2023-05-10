@@ -79,9 +79,11 @@ class NeRFLoader(torch.utils.data.Dataset):
         self.near = self.NEAR if near is None else near
         self.far = self.FAR if far is None else far
 
+        """
         self.training = (num_rays is not None) and (
             split in ["train", "trainval"]
         )
+        """
 
         self.color_bkgd_aug = color_bkgd_aug
 

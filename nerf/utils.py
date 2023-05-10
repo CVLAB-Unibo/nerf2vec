@@ -54,7 +54,7 @@ def render_image(
     # __D
     # ################################################################################
     if len(rays_shape) == 3:
-        height, width, _ = rays_shape
+        _,height, width, _ = rays_shape
         num_rays = height * width
         rays = namedtuple_map(
             lambda r: r.reshape([num_rays] + list(r.shape[2:])), rays
@@ -63,7 +63,17 @@ def render_image(
         num_rays, _ = rays_shape
     """
     rays_shape = rays.origins.shape
-    batch_size, num_rays, coordinates = rays_shape  # __D Remove unused variables once the debug is complete
+    if len(rays_shape) == 4:
+        batch_size, height, width, _ = rays_shape
+        num_rays = height * width
+        rays = namedtuple_map(
+            lambda r: r.reshape([batch_size] + [num_rays] + list(r.shape[3:])), rays
+        )
+    else:
+        batch_size, num_rays, _ = rays_shape
+   
+    # rays_shape = rays.origins.shape
+    # batch_size, num_rays, coordinates = rays_shape  # __D Remove unused variables once the debug is complete
 
     """
     def sigma_fn(t_starts, t_ends, ray_indices):
@@ -97,7 +107,9 @@ def render_image(
         if radiance_field.training
         else test_chunk_size
     )
-    
+
+    # TODO: check this
+    chunk = torch.iinfo(torch.int32).max
     
     # Divide in chunks [batch_size, ]
     for i in range(0, num_rays, chunk):
