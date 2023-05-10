@@ -65,6 +65,7 @@ def render_image(
     rays_shape = rays.origins.shape
     batch_size, num_rays, coordinates = rays_shape  # __D Remove unused variables once the debug is complete
 
+    """
     def sigma_fn(t_starts, t_ends, ray_indices):
         t_origins = chunk_rays.origins[ray_indices]
         t_dirs = chunk_rays.viewdirs[ray_indices]
@@ -80,7 +81,7 @@ def render_image(
         
         _, density = radiance_field._query_density_and_rgb(positions, None)
         return density
-        
+    """    
 
     def rgb_sigma_fn(t_starts, t_ends, ray_indices):
         _ = t_starts

@@ -1,13 +1,17 @@
 import math
 import time
+import imageio
 
 from nerfacc import ContractionType, OccupancyGrid
 from classification.utils import get_mlp_params_as_matrix, next_multiple
 
 import os
 import torch
+import numpy as np
 import torch.nn.functional as F
+from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
+from models.encoder import Encoder
 from models.idecoder import ImplicitDecoder
 
 from nerf.loader import NeRFLoader
@@ -85,28 +89,51 @@ class Nerf2vecTrainer:
             shuffle=True
         )
         
-        input_dim = 3
-        hidden_dim = 512
-        num_hidden_layers_before_skip = 2
-        num_hidden_layers_after_skip = 2
-        out_dim = 4
-        embedding_dim = 1024
+        encoder = Encoder(
+            config.MLP_UNITS,
+            config.ENCODER_HIDDEN_DIM,
+            config.ENCODER_EMBEDDING_DIM
+        )
+        self.encoder = encoder.cuda()
 
-
-        
         decoder = ImplicitDecoder(
-            embed_dim=embedding_dim,
-            in_dim=input_dim,
-            hidden_dim=hidden_dim,
-            num_hidden_layers_before_skip=num_hidden_layers_before_skip,
-            num_hidden_layers_after_skip=num_hidden_layers_after_skip,
-            out_dim=out_dim,
+            embed_dim=config.ENCODER_EMBEDDING_DIM,
+            in_dim=config.DECODER_INPUT_DIM,
+            hidden_dim=config.DECODER_HIDDEN_DIM,
+            num_hidden_layers_before_skip=config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
+            num_hidden_layers_after_skip=config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
+            out_dim=config.DECODER_OUT_DIM,
             encoding_conf=config.INSTANT_NGP_ENCODING_CONF,
             aabb=torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
         )
         self.decoder = decoder.cuda()
+
+        lr = config.LR
+        wd = config.WD
+        params = list(self.encoder.parameters())
+        params.extend(self.decoder.parameters())
+        self.optimizer = AdamW(params, lr, weight_decay=wd)
         
         self.epoch = 0
+        self.global_step = 0
+        # TODO....
+        """
+        self.best_chamfer = float("inf")
+
+        self.ckpts_path = get_out_dir() / "ckpts"
+        self.all_ckpts_path = get_out_dir() / "all_ckpts"
+
+        if self.ckpts_path.exists():
+            self.restore_from_last_ckpt()
+
+        self.ckpts_path.mkdir(exist_ok=True)
+        self.all_ckpts_path.mkdir(exist_ok=True)
+        """
+        self.grad_scaler = torch.cuda.amp.GradScaler(2**10)
+
+    def logfn(self, values: Dict[str, Any]) -> None:
+        #wandb.log(values, step=self.global_step, commit=False)
+        print(values)
     
     def train(self):
         num_epochs = config.NUM_EPOCHS
@@ -116,8 +143,8 @@ class Nerf2vecTrainer:
         for epoch in range(start_epoch, num_epochs):
 
             self.epoch = epoch
-            # self.encoder.train()
-            # self.decoder.train()
+            self.encoder.train()
+            self.decoder.train()
 
             desc = f"Epoch {epoch}/{num_epochs}"
 
@@ -147,7 +174,8 @@ class Nerf2vecTrainer:
 
                 #embeddings = self.encoder(matrices)
                 #pred = self.decoder(embeddings, selected_coords)
-                embeddings = torch.rand(config.BATCH_SIZE, 1024).cuda() # TODO: This is the output of the encoder!
+                # embeddings = torch.rand(config.BATCH_SIZE, config.ENCODER_EMBEDDING_DIM).cuda() # TODO: This is the output of the encoder!
+                embeddings = self.encoder(matrices)
                 
                 render_n_samples = 1024
                 scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
@@ -158,6 +186,7 @@ class Nerf2vecTrainer:
                 ).item()
                 alpha_thre = 0.0
 
+                # start_time = time.time()
                 rgb, acc, depth, n_rendering_samples = render_image(
                     self.decoder,
                     embeddings,
@@ -172,6 +201,8 @@ class Nerf2vecTrainer:
                     cone_angle=0.0,
                     alpha_thre=alpha_thre
                 )
+                # end_time = time.time()
+                # print(f'elapsed: {end_time-start_time}')
 
                 # TODO: evaluate whether to add this condition or not
                 if 0 in n_rendering_samples:
@@ -181,14 +212,37 @@ class Nerf2vecTrainer:
 
                 # compute loss
                 loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
-
+                self.optimizer.zero_grad()
+                # do not unscale it because we are using Adam.
+                self.grad_scaler.scale(loss).backward()
+                self.optimizer.step()
+                
+                """
                 INTERVAL = 100
                 if step % INTERVAL == 0:
 
                     # elapsed_time = time.time() - tic
                     loss = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
                     print(f'loss={loss:.5f}')
+                """
 
+                if self.global_step % 10 == 0:
+                    self.logfn({"train/loss": loss.item()})
+
+                # TOOD: call this while in eval mode!
+                """
+                imageio.imwrite(
+                            "acc_binary_test.png",
+                            ((acc.cpu().detach().numpy()[0] > 0).float().cpu().numpy() * 255).astype(np.uint8),
+                )
+                imageio.imwrite(
+                    "rgb_test.png",
+                    (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
+                )
+                """
+
+
+                self.global_step += 1
 
 
 
