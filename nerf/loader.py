@@ -84,6 +84,7 @@ class NeRFLoader(torch.utils.data.Dataset):
             split in ["train", "trainval"]
         )
         """
+        self.training = training
 
         self.color_bkgd_aug = color_bkgd_aug
 

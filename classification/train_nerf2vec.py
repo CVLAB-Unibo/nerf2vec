@@ -24,6 +24,7 @@ from typing import Any, Dict, Tuple
 from nerf.intant_ngp import NGPradianceField
 from classification import config
 from nerf.utils import generate_occupancy_grid, render_image
+from temp_sanity_check.create_video import create_video
 
 class NeRFDataset(Dataset):
     def __init__(self, nerfs_root: str, sample_sd: Dict[str, Any], device: str) -> None:
@@ -48,6 +49,8 @@ class NeRFDataset(Dataset):
             **dataset_kwargs)
         nerf_loader.training = True
 
+        # print(f'focal: {nerf_loader.focal}')
+
         # Get data for the batch
         data = nerf_loader[0]
         render_bkgd = data["color_bkgd"]
@@ -65,8 +68,22 @@ class NeRFDataset(Dataset):
         test_rays = test_data["rays"]
         test_pixels = test_data["pixels"]
 
+        
+        """
+        grid = generate_occupancy_grid('cuda:0', 
+                    nerf_loader.weights_file_path, 
+                    config.INSTANT_NGP_MLP_CONF, 
+                    config.AABB, 
+                    config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
+                    config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
+        torch.save(grid.state_dict(), 'grid.pth')
+        """
+        
 
-        return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd
+        grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
+
+
+        return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd, grid_weights
     
     
     def _get_nerf_paths(self, nerfs_root: str):
@@ -95,8 +112,8 @@ class Nerf2vecTrainer:
         
         self.train_loader = DataLoader(
             train_dset,
-            batch_size=config.BATCH_SIZE,#16,
-            num_workers=0,#4,
+            batch_size=config.BATCH_SIZE,
+            num_workers=4,#4,
             shuffle=True
         )
         
@@ -162,7 +179,7 @@ class Nerf2vecTrainer:
             for batch in self.train_loader:
 
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
-                rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds = batch
+                rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
                 # TODO: check rays, it is not created properly
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 pixels = pixels.cuda()
@@ -173,9 +190,31 @@ class Nerf2vecTrainer:
                 test_pixels = test_pixels.cuda()
                 test_render_bkgds = test_render_bkgds.cuda()
                 
-
+                
+                grid_resolution = 128
+                contraction_type = ContractionType.AABB
                 grids = []
                 
+                for idx in range(len(test_render_bkgds)):
+                    occupancy_grid = OccupancyGrid(
+                        roi_aabb=config.AABB,
+                        resolution=grid_resolution,
+                        contraction_type=contraction_type,
+                    ).to(self.device)
+                    
+                
+                    for key in grid_weights:
+                        occupancy_grid.state_dict()[key] = grid_weights[key][idx].cuda()
+                        # occupancy_grid.load_state_dict(torch.load(elem))
+
+                    occupancy_grid.load_state_dict(torch.load('grid.pth'))
+                    # occupancy_grid.eval()
+                    grids.append(occupancy_grid)
+                
+
+                """
+                grids = []
+                grid_start = time.time()
                 for elem in nerf_weights_path:
                     grid = generate_occupancy_grid(self.device, 
                                                 elem, 
@@ -184,9 +223,10 @@ class Nerf2vecTrainer:
                                                 config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
                                                 config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
                     grids.append(grid)
-                # end = time.time()
-                # print(f'elapsed: {end-start}')
-
+                grid_end = time.time()
+                print(f'grid creation elapsed: {grid_end-grid_start}')
+                """
+                
                 #embeddings = self.encoder(matrices)
                 #pred = self.decoder(embeddings, selected_coords)
                 # embeddings = torch.rand(config.BATCH_SIZE, config.ENCODER_EMBEDDING_DIM).cuda() # TODO: This is the output of the encoder!
@@ -240,54 +280,74 @@ class Nerf2vecTrainer:
                     loss = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
                     print(f'loss={loss:.5f}')
                 """
-
+                end = time.time()
+                # self.logfn(f'"train/loss": {loss.item()} - elapsed: {end-start}')
+                print(f'{self.global_step} - "train/loss": {loss.item()} - elapsed: {end-start}')
+                start = time.time()
+                
                 if self.global_step % 100 == 0:
-                    end = time.time()
-                    # self.logfn(f'"train/loss": {loss.item()} - elapsed: {end-start}')
-                    print(f'"train/loss": {loss.item()} - elapsed: {end-start}')
-
+                    
 
                     self.encoder.eval()
                     self.decoder.eval()
-                    # for i in tqdm.tqdm(range(len(self.TEMP_nerf_loader))):
-                    #data = self.TEMP_nerf_loader[i]
-                    #render_bkgd = data["color_bkgd"]
-                    #rays = data["rays"]
-                    #pixels = data["pixels"]
+                    with torch.no_grad():
+                        # for i in tqdm.tqdm(range(len(self.TEMP_nerf_loader))):
+                        #data = self.TEMP_nerf_loader[i]
+                        #render_bkgd = data["color_bkgd"]
+                        #rays = data["rays"]
+                        #pixels = data["pixels"]
 
-                    rgb, acc, depth, n_rendering_samples = render_image(
-                        self.decoder,
-                        embeddings,
-                        grids,
-                        test_rays,
-                        scene_aabb,
-                        # rendering options
-                        near_plane=None,
-                        far_plane=None,
-                        render_step_size=render_step_size,
-                        render_bkgd=test_render_bkgds,
-                        cone_angle=0.0,
-                        alpha_thre=alpha_thre
-                    )
+                        
+                        rgb, acc, depth, n_rendering_samples = render_image(
+                            self.decoder,
+                            embeddings,
+                            grids,
+                            test_rays,
+                            scene_aabb,
+                            # rendering options
+                            near_plane=None,
+                            far_plane=None,
+                            render_step_size=render_step_size,
+                            render_bkgd=test_render_bkgds,
+                            cone_angle=0.0,
+                            alpha_thre=alpha_thre
+                        )
 
-                    imageio.imwrite(
-                        os.path.join('temp_sanity_check', f'rgb_test_{self.global_step}.png'),
-                        (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
-                    )
-                    """
-                    imageio.imwrite(
-                                "acc_binary_test.png",
-                                ((acc.cpu().detach().numpy()[0] > 0).float().cpu().numpy() * 255).astype(np.uint8),
-                    )
-                    """
-                    
+                        imageio.imwrite(
+                            os.path.join('temp_sanity_check', f'rgb_test_{self.global_step}.png'),
+                            (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
+                        )
+                        
+                        
+                        """
+                        if self.global_step == 2900:
+                            create_video(
+                                    720, 
+                                    480, 
+                                    self.device, 
+                                    245.0, 
+                                    self.decoder, 
+                                    grids, 
+                                    scene_aabb,
+                                    None, 
+                                    None, 
+                                    render_step_size,
+                                    render_bkgd=test_render_bkgds,
+                                    cone_angle=0.0,
+                                    alpha_thre=alpha_thre,
+                                    # test options
+                                    path=os.path.join('temp_sanity_check', f'video_{self.global_step}.mp4'),
+                                    embeddings=embeddings
+                                )
+                        """
+
+                        
+                        
 
                     self.encoder.train()
                     self.decoder.train()
-                    start = time.time()
-                        
-
-
+                    
+                    
                 self.global_step += 1
 
 

@@ -1,2 +1,5 @@
 data/
 __pycache__/
+
+temp_data/
+temp_sanity_check/

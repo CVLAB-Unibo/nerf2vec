@@ -1,5 +1,6 @@
 import math
 import random
+import time
 from typing import Optional
 
 import numpy as np
@@ -39,29 +40,10 @@ def render_image(
     render_step_size: float = 1e-3,
     render_bkgd: Optional[torch.Tensor] = None,  # This should be [batch_size, render_bkgds]
     cone_angle: float = 0.0,
-    alpha_thre: float = 0.0,
-    # test options
-    test_chunk_size: int = 8192,
-    # only useful for dnerf
-    timestamps: Optional[torch.Tensor] = None,
+    alpha_thre: float = 0.0
 ):
     """Render the pixels of an image."""
-    
-    """
-    # ################################################################################
-    # __D
-    # __D this is the shape that arrives when testing. Will decide later what to do
-    # __D
-    # ################################################################################
-    if len(rays_shape) == 3:
-        _,height, width, _ = rays_shape
-        num_rays = height * width
-        rays = namedtuple_map(
-            lambda r: r.reshape([num_rays] + list(r.shape[2:])), rays
-        )
-    else:
-        num_rays, _ = rays_shape
-    """
+
     rays_shape = rays.origins.shape
     if len(rays_shape) == 4:
         batch_size, height, width, _ = rays_shape
@@ -71,28 +53,7 @@ def render_image(
         )
     else:
         batch_size, num_rays, _ = rays_shape
-   
-    # rays_shape = rays.origins.shape
-    # batch_size, num_rays, coordinates = rays_shape  # __D Remove unused variables once the debug is complete
-
-    """
-    def sigma_fn(t_starts, t_ends, ray_indices):
-        t_origins = chunk_rays.origins[ray_indices]
-        t_dirs = chunk_rays.viewdirs[ray_indices]
-        positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
-        if timestamps is not None:
-            # dnerf
-            t = (
-                timestamps[ray_indices]
-                if radiance_field.training
-                else timestamps.expand_as(positions[:, :1])
-            )
-            return radiance_field.query_density(positions, t)
-        
-        _, density = radiance_field._query_density_and_rgb(positions, None)
-        return density
-    """    
-
+ 
     def rgb_sigma_fn(t_starts, t_ends, ray_indices):
         _ = t_starts
         _ = t_ends
@@ -102,33 +63,18 @@ def render_image(
         return rgb, sigmas
 
     results = []
-    chunk = (
-        torch.iinfo(torch.int32).max
-        if radiance_field.training
-        else test_chunk_size
-    )
-
-    # TODO: check this
     chunk = torch.iinfo(torch.int32).max
     
-    # Divide in chunks [batch_size, ]
+    # start_time = time.time()
     for i in range(0, num_rays, chunk):
-        # chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays)
-        chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)  # Add the batch size
-
-        """
-        tensor_size = chunk if num_rays >= chunk else num_rays
-        b_ray_indices = torch.zeros(batch_size, 1)
-        b_t_starts = torch.zeros(batch_size, tensor_size, 1)
-        b_t_ends = torch.zeros(batch_size, tensor_size, 1)
-        """
+        chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)
 
         b_positions = []
         b_t_starts = []
         b_t_ends = []
         b_ray_indices = []
 
-        # Compute the positions for all the element in the batch.
+        # Compute the positions for all the elements in the batch.
         # These position will be used for calling the decoder.
         for batch_idx in range(batch_size):
 
@@ -167,6 +113,14 @@ def render_image(
         # Get the minimum size among all tensors, so as to have a tensor that can be passed to the decoder 
         # (i.e., all tensors will have the same dimensions)
         MIN_SIZE = min([tensor.size(0) for tensor in b_positions])
+        print(MIN_SIZE)
+        #if MIN_SIZE > 50000: # TODO: TUNED WITH BATCH_SIZE = 16. Find a way for making this number dynamic.
+        #    MIN_SIZE = 50000
+        
+        if radiance_field.training:
+            if MIN_SIZE > 100000:
+                MIN_SIZE = 100000
+
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
         b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
         b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
@@ -181,10 +135,9 @@ def render_image(
         # ################################################################################
         # VOLUME RENDERING
         # ################################################################################
-
         curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions)
         
-
+        
         for curr_batch_idx in range(batch_size):
             rgb, opacity, depth = rendering(
                 b_t_starts[curr_batch_idx],
@@ -195,20 +148,31 @@ def render_image(
                 render_bkgd=render_bkgd[curr_batch_idx],
             )
             chunk_results = [rgb, opacity, depth, len(b_t_starts[curr_batch_idx])]
-            results.append(chunk_results)
+            # results.append(chunk_results)
+            if curr_batch_idx < len(results):
+                results[curr_batch_idx][0].append(chunk_results)
+            else:
+                results.append([chunk_results])
+    
+    colors, opacities, depths, n_rendering_samples = zip(*[
+        (
+            torch.cat([r[0] for r in batch], dim=0),
+            torch.cat([r[1] for r in batch], dim=0),
+            torch.cat([r[2] for r in batch], dim=0),
+            [r[3] for r in batch]
+        ) for batch in results
+    ])
 
-    colors, opacities, depths, n_rendering_samples = [
-        torch.cat(r, dim=0) if isinstance(r[0], torch.Tensor) else r
-        for r in zip(*results)
-    ]
+    colors = torch.stack(colors, dim=0).view((*rays_shape[:-1], -1))
+    opacities = torch.stack(opacities, dim=0).view((*rays_shape[:-1], -1))
+    depths = torch.stack(depths, dim=0).view((*rays_shape[:-1], -1))
+    n_rendering_samples = [elem[0] for elem in n_rendering_samples]
 
+    # end_time = time.time()
+    # print(f'\t Passing data through encoder/decoder required: {end_time - start_time}')
     return (
-        colors.view((*rays_shape[:-1], -1)),
-        opacities.view((*rays_shape[:-1], -1)),
-        depths.view((*rays_shape[:-1], -1)),
-        n_rendering_samples,
+        colors, opacities, depths, n_rendering_samples
     )
-
 
 def generate_occupancy_grid(
         device, 
@@ -265,5 +229,3 @@ def generate_occupancy_grid(
                 )
 
         return occupancy_grid
-
-
