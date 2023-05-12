@@ -23,7 +23,7 @@ from typing import Any, Dict, Tuple
 
 from nerf.intant_ngp import NGPradianceField
 from classification import config
-from nerf.utils import generate_occupancy_grid, render_image
+from nerf.utils import Rays, generate_occupancy_grid, render_image
 from temp_sanity_check.create_video import create_video
 
 class NeRFDataset(Dataset):
@@ -80,7 +80,8 @@ class NeRFDataset(Dataset):
         """
         
 
-        grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
+        # grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
+        grid_weights = []
 
 
         return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd, grid_weights
@@ -113,7 +114,7 @@ class Nerf2vecTrainer:
         self.train_loader = DataLoader(
             train_dset,
             batch_size=config.BATCH_SIZE,
-            num_workers=4,#4,
+            num_workers=0,#4,
             shuffle=True
         )
         
@@ -177,7 +178,7 @@ class Nerf2vecTrainer:
             desc = f"Epoch {epoch}/{num_epochs}"
 
             for batch in self.train_loader:
-
+                batch_start = time.time()
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
                 # TODO: check rays, it is not created properly
@@ -191,28 +192,35 @@ class Nerf2vecTrainer:
                 test_render_bkgds = test_render_bkgds.cuda()
                 
                 
+                """
                 grid_resolution = 128
                 contraction_type = ContractionType.AABB
                 grids = []
-                
+                grid_start = time.time()
                 for idx in range(len(test_render_bkgds)):
                     occupancy_grid = OccupancyGrid(
                         roi_aabb=config.AABB,
                         resolution=grid_resolution,
                         contraction_type=contraction_type,
                     ).to(self.device)
-                    
-                
+                    occupancy_grid.eval()
+                    '''
+                    c_dict = {}
                     for key in grid_weights:
-                        occupancy_grid.state_dict()[key] = grid_weights[key][idx].cuda()
+                        c_dict[key] = grid_weights[key][idx].cuda()
+                    occupancy_grid.load_state_dict(c_dict)
                         # occupancy_grid.load_state_dict(torch.load(elem))
-
+                    '''
                     occupancy_grid.load_state_dict(torch.load('grid.pth'))
                     # occupancy_grid.eval()
                     grids.append(occupancy_grid)
                 
-
+                grid_end = time.time()
+                # print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
                 """
+                
+                
+                
                 grids = []
                 grid_start = time.time()
                 for elem in nerf_weights_path:
@@ -224,8 +232,10 @@ class Nerf2vecTrainer:
                                                 config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
                     grids.append(grid)
                 grid_end = time.time()
-                print(f'grid creation elapsed: {grid_end-grid_start}')
-                """
+                print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
+                
+                
+                
                 
                 #embeddings = self.encoder(matrices)
                 #pred = self.decoder(embeddings, selected_coords)
@@ -261,6 +271,7 @@ class Nerf2vecTrainer:
 
                 # TODO: evaluate whether to add this condition or not
                 if 0 in n_rendering_samples:
+                    print(f'0 n_rendering_samples. Skip iteration.')
                     continue
 
                 alive_ray_mask = acc.squeeze(-1) > 0
@@ -280,13 +291,15 @@ class Nerf2vecTrainer:
                     loss = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
                     print(f'loss={loss:.5f}')
                 """
-                end = time.time()
-                # self.logfn(f'"train/loss": {loss.item()} - elapsed: {end-start}')
-                print(f'{self.global_step} - "train/loss": {loss.item()} - elapsed: {end-start}')
-                start = time.time()
                 
+                # self.logfn(f'"train/loss": {loss.item()} - elapsed: {end-start}')
+                batch_end = time.time()
+                print(f'{self.global_step} - Single batch: {batch_end-batch_start}')
+                batch_start = time.time()
+
                 if self.global_step % 100 == 0:
-                    
+                    end = time.time()
+                    print(f'{self.global_step} - "train/loss": {loss.item()} - elapsed: {end-start}')
 
                     self.encoder.eval()
                     self.decoder.eval()
@@ -300,9 +313,9 @@ class Nerf2vecTrainer:
                         
                         rgb, acc, depth, n_rendering_samples = render_image(
                             self.decoder,
-                            embeddings,
-                            grids,
-                            test_rays,
+                            embeddings[0].unsqueeze(dim=0),
+                            [grids[0]],
+                            Rays(origins=test_rays.origins[0].unsqueeze(dim=0), viewdirs=test_rays.viewdirs[0].unsqueeze(dim=0)),
                             scene_aabb,
                             # rendering options
                             near_plane=None,
@@ -340,10 +353,8 @@ class Nerf2vecTrainer:
                                     embeddings=embeddings
                                 )
                         """
-
                         
-                        
-
+                    start = time.time()
                     self.encoder.train()
                     self.decoder.train()
                     

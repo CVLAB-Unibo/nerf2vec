@@ -65,6 +65,12 @@ def render_image(
     results = []
     chunk = torch.iinfo(torch.int32).max
     
+    chunk = (
+        torch.iinfo(torch.int32).max
+        if radiance_field.training
+        else 8196
+    )
+    
     # start_time = time.time()
     for i in range(0, num_rays, chunk):
         chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)
@@ -113,24 +119,42 @@ def render_image(
         # Get the minimum size among all tensors, so as to have a tensor that can be passed to the decoder 
         # (i.e., all tensors will have the same dimensions)
         MIN_SIZE = min([tensor.size(0) for tensor in b_positions])
-        print(MIN_SIZE)
-        #if MIN_SIZE > 50000: # TODO: TUNED WITH BATCH_SIZE = 16. Find a way for making this number dynamic.
-        #    MIN_SIZE = 50000
+        # print(MIN_SIZE)
         
-        if radiance_field.training:
-            if MIN_SIZE > 100000:
-                MIN_SIZE = 100000
+        if radiance_field.training: # Avoid OOM in case of too many rays
+            if MIN_SIZE > 50000:
+                MIN_SIZE = 50000
 
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
         b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
         b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
         b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
 
-        # _, sigmas = radiance_field(embeddings, b_positions_truncated)
+
+        """
+        # RENDER VISIBILITY
+        _, sigmas = radiance_field(embeddings, b_positions)
         #assert (
         #    sigmas.shape == t_starts.shape
         #), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
-        # alphas = 1.0 - torch.exp(-sigmas * (b_t_ends_truncated - b_t_starts_truncated))
+        alphas = 1.0 - torch.exp(-sigmas * (b_t_ends - b_t_starts))
+        for curr_batch_idx in range(batch_size):
+
+            masks = render_visibility(
+                alphas[curr_batch_idx],
+                ray_indices=b_ray_indices[curr_batch_idx],
+                packed_info=None,
+                early_stop_eps=1e-4,
+                alpha_thre=alpha_thre,
+                n_rays=chunk_rays.origins[batch_idx].shape[0]
+            )
+
+            b_ray_indices[curr_batch_idx] = b_ray_indices[curr_batch_idx][masks]
+            t_starts[curr_batch_idx] = t_starts[curr_batch_idx][masks]
+            t_ends[curr_batch_idx] = t_ends[curr_batch_idx][masks]
+
+            print()
+        """
 
         # ################################################################################
         # VOLUME RENDERING
@@ -143,16 +167,25 @@ def render_image(
                 b_t_starts[curr_batch_idx],
                 b_t_ends[curr_batch_idx],
                 b_ray_indices[curr_batch_idx],
-                n_rays=num_rays,
+                n_rays=chunk_rays.origins.shape[1], #num_rays,
                 rgb_sigma_fn=rgb_sigma_fn,
                 render_bkgd=render_bkgd[curr_batch_idx],
             )
             chunk_results = [rgb, opacity, depth, len(b_t_starts[curr_batch_idx])]
+            
             # results.append(chunk_results)
             if curr_batch_idx < len(results):
-                results[curr_batch_idx][0].append(chunk_results)
+                # results[curr_batch_idx][0].append(chunk_results)
+                results[curr_batch_idx][0][0] = torch.cat([results[curr_batch_idx][0][0], chunk_results[0]], dim=0)
+                results[curr_batch_idx][0][1] = torch.cat([results[curr_batch_idx][0][1], chunk_results[1]], dim=0)
+                results[curr_batch_idx][0][2] = torch.cat([results[curr_batch_idx][0][2], chunk_results[2]], dim=0)
+                results[curr_batch_idx][0][3] = results[curr_batch_idx][0][3] + chunk_results[3]
+
+                results[curr_batch_idx][0]
             else:
                 results.append([chunk_results])
+            
+            results[curr_batch_idx].append
     
     colors, opacities, depths, n_rendering_samples = zip(*[
         (
