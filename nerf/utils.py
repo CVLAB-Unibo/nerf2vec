@@ -63,12 +63,12 @@ def render_image(
         return rgb, sigmas
 
     results = []
-    chunk = torch.iinfo(torch.int32).max
     
+    # chunk = torch.iinfo(torch.int32).max
     chunk = (
         torch.iinfo(torch.int32).max
         if radiance_field.training
-        else 8196
+        else 4096
     )
     
     # start_time = time.time()
@@ -122,39 +122,78 @@ def render_image(
         # print(MIN_SIZE)
         
         if radiance_field.training: # Avoid OOM in case of too many rays
-            if MIN_SIZE > 50000:
-                MIN_SIZE = 50000
+            if MIN_SIZE > 100000:
+                MIN_SIZE = 100000
+            #if MIN_SIZE > 4096:
+            #    MIN_SIZE = 4096
 
+       
+
+
+        # #####
+        # RAMDOM SELECTION
+        # #####
+        """
+        for b in range(batch_size):
+            n_elements = b_positions[b].shape[0]
+            indices = torch.randperm(n_elements)[:MIN_SIZE]
+            b_positions[b] = b_positions[b][indices]
+            b_t_starts[b] = b_t_starts[b][indices]
+            b_t_ends[b] = b_t_ends[b][indices]
+            b_ray_indices[b] = b_ray_indices[b][indices]
+
+            
+        b_positions = torch.stack(b_positions, dim=0)
+        b_t_starts = torch.stack(b_t_starts, dim=0)
+        b_t_ends = torch.stack(b_t_ends, dim=0)
+        b_ray_indices = torch.stack(b_ray_indices, dim=0)
+        """
+
+
+
+        # ################################################################################
+        # RENDER VISIBILITY
+        # ################################################################################
+        b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
+        #b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
+        #b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
+        #b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
+        
+        curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions)
+        # Compute visibility of the samples, and filter out invisible samples
+        for batch_idx in range(batch_size): 
+            sigmas = curr_sigmas[batch_idx]
+
+            alphas = 1.0 - torch.exp(-sigmas * (b_t_ends[batch_idx] - b_t_starts[batch_idx]))
+            masks = render_visibility(
+                alphas,
+                ray_indices=b_ray_indices[batch_idx],
+                packed_info=None,
+                early_stop_eps=1e-4,
+                alpha_thre=alpha_thre,
+                n_rays=chunk_rays.origins.shape[1]
+            )
+
+            b_ray_indices[batch_idx] = b_ray_indices[batch_idx][masks]
+            b_t_starts[batch_idx] = b_t_starts[batch_idx][masks]
+            b_t_ends[batch_idx] = b_t_ends[batch_idx][masks]
+
+        
+        b_positions = []
+        for batch_idx in range(batch_size):
+            
+            batch_idx_indices = b_ray_indices[batch_idx]
+
+            t_origins = chunk_rays.origins[batch_idx][batch_idx_indices]
+            t_dirs = chunk_rays.viewdirs[batch_idx][batch_idx_indices]
+            positions = t_origins + t_dirs * (b_t_starts[batch_idx] + b_t_ends[batch_idx]) / 2.0
+            b_positions.append(positions)
+        
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
         b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
         b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
         b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
 
-
-        """
-        # RENDER VISIBILITY
-        _, sigmas = radiance_field(embeddings, b_positions)
-        #assert (
-        #    sigmas.shape == t_starts.shape
-        #), "sigmas must have shape of (N, 1)! Got {}".format(sigmas.shape)
-        alphas = 1.0 - torch.exp(-sigmas * (b_t_ends - b_t_starts))
-        for curr_batch_idx in range(batch_size):
-
-            masks = render_visibility(
-                alphas[curr_batch_idx],
-                ray_indices=b_ray_indices[curr_batch_idx],
-                packed_info=None,
-                early_stop_eps=1e-4,
-                alpha_thre=alpha_thre,
-                n_rays=chunk_rays.origins[batch_idx].shape[0]
-            )
-
-            b_ray_indices[curr_batch_idx] = b_ray_indices[curr_batch_idx][masks]
-            t_starts[curr_batch_idx] = t_starts[curr_batch_idx][masks]
-            t_ends[curr_batch_idx] = t_ends[curr_batch_idx][masks]
-
-            print()
-        """
 
         # ################################################################################
         # VOLUME RENDERING
@@ -176,14 +215,19 @@ def render_image(
             # results.append(chunk_results)
             if curr_batch_idx < len(results):
                 # results[curr_batch_idx][0].append(chunk_results)
-                results[curr_batch_idx][0][0] = torch.cat([results[curr_batch_idx][0][0], chunk_results[0]], dim=0)
-                results[curr_batch_idx][0][1] = torch.cat([results[curr_batch_idx][0][1], chunk_results[1]], dim=0)
-                results[curr_batch_idx][0][2] = torch.cat([results[curr_batch_idx][0][2], chunk_results[2]], dim=0)
-                results[curr_batch_idx][0][3] = results[curr_batch_idx][0][3] + chunk_results[3]
+                #results[curr_batch_idx][0][0] = torch.cat([results[curr_batch_idx][0][0], chunk_results[0]], dim=0)
+                #results[curr_batch_idx][0][1] = torch.cat([results[curr_batch_idx][0][1], chunk_results[1]], dim=0)
+                #results[curr_batch_idx][0][2] = torch.cat([results[curr_batch_idx][0][2], chunk_results[2]], dim=0)
+                #results[curr_batch_idx][0][3] = results[curr_batch_idx][0][3] + chunk_results[3]
+
+
+                results[curr_batch_idx].append(chunk_results)
+                #results[curr_batch_idx][0][1].append(chunk_results[1])
+                #results[curr_batch_idx][0][2].append(chunk_results[2])
+                #results[curr_batch_idx][0][3].append(chunk_results[3])
             else:
                 results.append([chunk_results])
             
-            results[curr_batch_idx].append
     
     colors, opacities, depths, n_rendering_samples = zip(*[
         (
@@ -193,12 +237,14 @@ def render_image(
             [r[3] for r in batch]
         ) for batch in results
     ])
-
+    
+    
     colors = torch.stack(colors, dim=0).view((*rays_shape[:-1], -1))
     opacities = torch.stack(opacities, dim=0).view((*rays_shape[:-1], -1))
     depths = torch.stack(depths, dim=0).view((*rays_shape[:-1], -1))
     n_rendering_samples = [elem[0] for elem in n_rendering_samples]
-
+    
+    
     # end_time = time.time()
     # print(f'\t Passing data through encoder/decoder required: {end_time - start_time}')
     return (
@@ -223,7 +269,7 @@ def generate_occupancy_grid(
 
         # Create the OccupancyGrid
         render_n_samples = 1024
-        grid_resolution = 128
+        grid_resolution = 64
         
         contraction_type = ContractionType.AABB
         scene_aabb = torch.tensor(aabb, dtype=torch.float32, device=device)

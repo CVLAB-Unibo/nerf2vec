@@ -77,6 +77,7 @@ class NeRFDataset(Dataset):
                     config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
                     config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
         torch.save(grid.state_dict(), 'grid.pth')
+        exit()
         """
         
 
@@ -115,7 +116,7 @@ class Nerf2vecTrainer:
             train_dset,
             batch_size=config.BATCH_SIZE,
             num_workers=0,#4,
-            shuffle=True
+            shuffle=False#True
         )
         
         encoder = Encoder(
@@ -222,7 +223,7 @@ class Nerf2vecTrainer:
                 
                 
                 grids = []
-                grid_start = time.time()
+                #grid_start = time.time()
                 for elem in nerf_weights_path:
                     grid = generate_occupancy_grid(self.device, 
                                                 elem, 
@@ -231,8 +232,10 @@ class Nerf2vecTrainer:
                                                 config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
                                                 config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
                     grids.append(grid)
-                grid_end = time.time()
-                print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
+                #grid_end = time.time()
+                # print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
+                
+                # grids = [None] * config.BATCH_SIZE
                 
                 
                 
@@ -310,12 +313,12 @@ class Nerf2vecTrainer:
                         #rays = data["rays"]
                         #pixels = data["pixels"]
 
-                        
+                        idx_to_draw = 0
                         rgb, acc, depth, n_rendering_samples = render_image(
                             self.decoder,
-                            embeddings[0].unsqueeze(dim=0),
-                            [grids[0]],
-                            Rays(origins=test_rays.origins[0].unsqueeze(dim=0), viewdirs=test_rays.viewdirs[0].unsqueeze(dim=0)),
+                            embeddings[idx_to_draw].unsqueeze(dim=0),
+                            [grids[idx_to_draw]],
+                            Rays(origins=test_rays.origins[idx_to_draw].unsqueeze(dim=0), viewdirs=test_rays.viewdirs[idx_to_draw].unsqueeze(dim=0)),
                             scene_aabb,
                             # rendering options
                             near_plane=None,
@@ -332,7 +335,7 @@ class Nerf2vecTrainer:
                         )
                         
                         
-                        """
+                        
                         if self.global_step == 2900:
                             create_video(
                                     720, 
@@ -352,7 +355,7 @@ class Nerf2vecTrainer:
                                     path=os.path.join('temp_sanity_check', f'video_{self.global_step}.mp4'),
                                     embeddings=embeddings
                                 )
-                        """
+                        
                         
                     start = time.time()
                     self.encoder.train()
