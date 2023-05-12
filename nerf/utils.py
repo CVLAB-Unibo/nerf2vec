@@ -128,8 +128,6 @@ def render_image(
             #    MIN_SIZE = 4096
 
        
-
-
         # #####
         # RAMDOM SELECTION
         # #####
@@ -150,16 +148,22 @@ def render_image(
         """
 
 
-
         # ################################################################################
         # RENDER VISIBILITY
         # ################################################################################
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
-        #b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
-        #b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
-        #b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
+        b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
+        b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
+        b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
         
         curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions)
+
+
+
+        
+        b_t_starts_visible = []
+        b_t_ends_visible = []
+        b_ray_indices_visible = []
         # Compute visibility of the samples, and filter out invisible samples
         for batch_idx in range(batch_size): 
             sigmas = curr_sigmas[batch_idx]
@@ -173,13 +177,23 @@ def render_image(
                 alpha_thre=alpha_thre,
                 n_rays=chunk_rays.origins.shape[1]
             )
+            
+            b_ray_indices_visible.append(b_ray_indices[batch_idx][masks])
+            b_t_starts_visible.append(b_t_starts[batch_idx][masks])
+            b_t_ends_visible.append(b_t_ends[batch_idx][masks])
 
-            b_ray_indices[batch_idx] = b_ray_indices[batch_idx][masks]
-            b_t_starts[batch_idx] = b_t_starts[batch_idx][masks]
-            b_t_ends[batch_idx] = b_t_ends[batch_idx][masks]
-
+            #b_ray_indices[batch_idx] = b_ray_indices[batch_idx][masks]
+            #b_t_starts[batch_idx] = b_t_starts[batch_idx][masks]
+            #b_t_ends[batch_idx] = b_t_ends[batch_idx][masks]
         
+        # Recompute the min size, so as to have again a tensor that can be passed to the decoder
+        # (i.e., equal sizes in all the elements in the batch)
+        MIN_SIZE = min([tensor.size(0) for tensor in b_t_starts_visible])
+        b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts_visible], dim=0)
+        b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends_visible], dim=0)
+        b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices_visible], dim=0)
         b_positions = []
+
         for batch_idx in range(batch_size):
             
             batch_idx_indices = b_ray_indices[batch_idx]
@@ -190,9 +204,7 @@ def render_image(
             b_positions.append(positions)
         
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
-        b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
-        b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
-        b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
+        
 
 
         # ################################################################################
@@ -268,7 +280,7 @@ def generate_occupancy_grid(
         radiance_field.eval()
 
         # Create the OccupancyGrid
-        render_n_samples = 1024
+        render_n_samples = 128
         grid_resolution = 64
         
         contraction_type = ContractionType.AABB
