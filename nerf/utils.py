@@ -180,8 +180,6 @@ def render_image(
                 results[curr_batch_idx][0][1] = torch.cat([results[curr_batch_idx][0][1], chunk_results[1]], dim=0)
                 results[curr_batch_idx][0][2] = torch.cat([results[curr_batch_idx][0][2], chunk_results[2]], dim=0)
                 results[curr_batch_idx][0][3] = results[curr_batch_idx][0][3] + chunk_results[3]
-
-                results[curr_batch_idx][0]
             else:
                 results.append([chunk_results])
             
