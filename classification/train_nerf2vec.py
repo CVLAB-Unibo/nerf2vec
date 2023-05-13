@@ -1,11 +1,15 @@
 import gzip
 import math
+import multiprocessing
 import pickle
+import shutil
 import subprocess
 import time
+import zipfile
 import imageio
 
 from nerfacc import ContractionType, OccupancyGrid
+import psutil
 import tqdm
 from classification.utils import get_mlp_params_as_matrix, next_multiple
 
@@ -99,16 +103,18 @@ class NeRFDataset(Dataset):
         # Save the model in a compressed format
         #with gzip.open('grid.pth.gz', 'wb') as f:
         #    torch.save(dict, f)
+        with open(file_path, 'w') as file:
+            json.dump(my_dict, file)
         exit()
         """
         
-        
-        
-        
+        # with gzip.open('grid.pth.gz', 'rb') as f:
+        #    grid_weights = torch.load(f)
         
 
+
         # grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
-        grid_weights = []
+        #grid_weights = []
         grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
         grid_weights['_binary'] = grid_weights['_binary'].to_dense()
 
@@ -132,6 +138,13 @@ class NeRFDataset(Dataset):
                 nerf_paths.append(subject_dir)
         
         return nerf_paths
+
+def unzip_file(file_path, extract_dir):
+    with gzip.open(file_path, 'rb') as f_in:
+        file_name = os.path.basename(file_path)
+        output_path = os.path.join(extract_dir, file_name[:-3])  # Remove the .gz extension
+        with open(output_path, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
 
 class Nerf2vecTrainer:
     def __init__(self, device='cuda:0') -> None:
@@ -198,10 +211,57 @@ class Nerf2vecTrainer:
 
         start = time.time()
 
-        called = False
+        grid_resolution = 128
+        contraction_type = ContractionType.AABB
+        occupancy_grid = OccupancyGrid(
+            roi_aabb=config.AABB,
+            resolution=grid_resolution,
+            contraction_type=contraction_type,
+        ).to(self.device)
+        occupancy_grid.eval()
 
 
         for epoch in range(start_epoch, num_epochs):
+            
+            """
+            shutil.rmtree('zipped_grids')
+            path = Path('zipped_grids')
+            path.mkdir(parents=True, exist_ok=True)
+            for i in range(5000):
+                shutil.copy2('grid.pth.gz', os.path.join('zipped_grids', f'grid.pth_{i}.gz'))
+            exit()
+            """
+            N_CACHED_GRIDS = 512
+            if self.global_step % (N_CACHED_GRIDS/config.BATCH_SIZE)  == 0:
+                print('Prepare the grids!')
+                start_unzip = time.time()
+                shutil.rmtree('grids')
+                path = Path('grids')
+                path.mkdir(parents=True, exist_ok=True)
+                
+                folder_path = 'zipped_grids'  # Replace with the path to the folder containing the zip files
+                extract_dir = 'grids'  # Replace with the desired extraction directory
+
+                # Get a list of GZ files in the folder
+                gz_files = [file for file in os.listdir(folder_path) if file.endswith('.gz')][N_CACHED_GRIDS]
+
+                # Create a pool of worker processes
+                pool = multiprocessing.Pool()
+
+                # Unzip files in parallel
+                for gz_file in gz_files:
+                    file_path = os.path.join(folder_path, gz_file)
+                    pool.apply_async(unzip_file, args=(file_path, extract_dir))
+
+                # Close the pool and wait for the processes to complete
+                pool.close()
+                pool.join()
+
+
+
+                end_unzip=time.time()
+                print(end_unzip-start_unzip)
+            
 
             self.epoch = epoch
             self.encoder.train()
@@ -211,13 +271,6 @@ class Nerf2vecTrainer:
 
             for batch in self.train_loader:
                 
-                """
-                if called == False:
-                    called = True
-                    script_path = 'grid_script.py'
-                    process = subprocess.Popen(['python', script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                """
-
                 batch_start = time.time()
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
@@ -232,11 +285,12 @@ class Nerf2vecTrainer:
                 test_render_bkgds = test_render_bkgds.cuda()
                 
                 
-                
+                """
                 grid_resolution = 128
                 contraction_type = ContractionType.AABB
                 grids = []
                 grid_start = time.time()
+
                 for idx in range(len(test_render_bkgds)):
                     occupancy_grid = OccupancyGrid(
                         roi_aabb=config.AABB,
@@ -258,10 +312,11 @@ class Nerf2vecTrainer:
 
                     # occupancy_grid.eval()
                     grids.append(occupancy_grid)
+                """
                 
                 
-                grid_end = time.time()
-                print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
+                #grid_end = time.time()
+                #print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
                 
                 
                 
@@ -321,7 +376,7 @@ class Nerf2vecTrainer:
                 rgb, acc, depth, n_rendering_samples = render_image(
                     self.decoder,
                     embeddings,
-                    grids,
+                    occupancy_grid,
                     rays,
                     scene_aabb,
                     # rendering options
@@ -330,7 +385,8 @@ class Nerf2vecTrainer:
                     render_step_size=render_step_size,
                     render_bkgd=render_bkgds,
                     cone_angle=0.0,
-                    alpha_thre=alpha_thre
+                    alpha_thre=alpha_thre,
+                    grid_weights=grid_weights
                 )
                 # end_time = time.time()
                 # print(f'elapsed: {end_time-start_time}')
@@ -376,11 +432,16 @@ class Nerf2vecTrainer:
                         #rays = data["rays"]
                         #pixels = data["pixels"]
 
+                        c_dict = {}
+                        for key in grid_weights:
+                            c_dict[key] = grid_weights[key][0]
+                        
+
                         idx_to_draw = 0
                         rgb, acc, depth, n_rendering_samples = render_image(
                             self.decoder,
                             embeddings[idx_to_draw].unsqueeze(dim=0),
-                            [grids[idx_to_draw]],
+                            occupancy_grid,#[grids[idx_to_draw]],
                             Rays(origins=test_rays.origins[idx_to_draw].unsqueeze(dim=0), viewdirs=test_rays.viewdirs[idx_to_draw].unsqueeze(dim=0)),
                             scene_aabb,
                             # rendering options
@@ -389,7 +450,8 @@ class Nerf2vecTrainer:
                             render_step_size=render_step_size,
                             render_bkgd=test_render_bkgds,
                             cone_angle=0.0,
-                            alpha_thre=alpha_thre
+                            alpha_thre=alpha_thre,
+                            grid_weights=grid_weights
                         )
 
                         imageio.imwrite(
@@ -398,7 +460,7 @@ class Nerf2vecTrainer:
                         )
                         
                         
-                        
+                        """
                         if self.global_step == 2900:
                             create_video(
                                     448, 
@@ -418,6 +480,7 @@ class Nerf2vecTrainer:
                                     path=os.path.join('temp_sanity_check', f'video_{self.global_step}.mp4'),
                                     embeddings=embeddings
                                 )
+                        """
                         
                         
                     start = time.time()
