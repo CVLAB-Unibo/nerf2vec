@@ -1,4 +1,6 @@
+import gzip
 import math
+import subprocess
 import time
 import imageio
 
@@ -76,9 +78,12 @@ class NeRFDataset(Dataset):
                     config.AABB, 
                     config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
                     config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
+
+        # Save the model in a compressed format
         torch.save(grid.state_dict(), 'grid.pth')
         exit()
         """
+        
         
 
         # grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
@@ -170,6 +175,9 @@ class Nerf2vecTrainer:
         start_epoch = self.epoch
 
         start = time.time()
+
+        called = False
+
         for epoch in range(start_epoch, num_epochs):
 
             self.epoch = epoch
@@ -179,6 +187,12 @@ class Nerf2vecTrainer:
             desc = f"Epoch {epoch}/{num_epochs}"
 
             for batch in self.train_loader:
+                
+                if called == False:
+                    called = True
+                    script_path = 'grid_script.py'
+                    process = subprocess.Popen(['python', script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
                 batch_start = time.time()
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
@@ -193,7 +207,7 @@ class Nerf2vecTrainer:
                 test_render_bkgds = test_render_bkgds.cuda()
                 
                 
-                """
+                
                 grid_resolution = 128
                 contraction_type = ContractionType.AABB
                 grids = []
@@ -216,12 +230,12 @@ class Nerf2vecTrainer:
                     # occupancy_grid.eval()
                     grids.append(occupancy_grid)
                 
-                grid_end = time.time()
+                #grid_end = time.time()
                 # print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
+                
+                
+                
                 """
-                
-                
-                
                 grids = []
                 #grid_start = time.time()
                 for elem in nerf_weights_path:
@@ -236,6 +250,7 @@ class Nerf2vecTrainer:
                 # print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
                 
                 # grids = [None] * config.BATCH_SIZE
+                """
                 
                 
                 
@@ -338,8 +353,8 @@ class Nerf2vecTrainer:
                         
                         if self.global_step == 2900:
                             create_video(
-                                    720, 
-                                    480, 
+                                    448, 
+                                    448, 
                                     self.device, 
                                     245.0, 
                                     self.decoder, 
