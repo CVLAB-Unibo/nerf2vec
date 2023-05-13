@@ -4,11 +4,18 @@ from nerfacc import ContractionType, OccupancyGrid
 import torch
 from classification import config
 from nerf.intant_ngp import NGPradianceField
-from nerf.loader import NeRFLoader
-from nerf.utils import generate_occupancy_grid
 
 
-def generate_occupancy_grid(
+class MyModule(torch.nn.Module):
+    def __init__(self, input_size, output_size):
+        super(MyModule, self).__init__()
+        self.linear = torch.nn.Linear(input_size, output_size)
+        
+    def forward(self, x):
+        out = self.linear(x)
+        return torch.rand(4)
+
+def generate_occupancy_grid2(
         device, 
         weights_path, 
         nerf_dict, 
@@ -42,13 +49,17 @@ def generate():
     with open('logs.txt', 'a') as f:
         f.write('generating!\n')
     
+    device = 'cpu'
+    
+    """
     radiance_field = NGPradianceField(
                 **config.INSTANT_NGP_MLP_CONF
-            ).to('cuda:0')
-    
+            ).to(device)
+    """
+    radiance_field = MyModule(3,4)
     weights_path = os.path.join('data', '02691156', '1a04e3eab45ca15dd86060f189eb133', 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth')
     matrix = torch.load(weights_path)
-    radiance_field.load_state_dict(matrix)
+    #radiance_field.load_state_dict(matrix)
     radiance_field.eval()
 
     # Create the OccupancyGrid
@@ -56,7 +67,7 @@ def generate():
     grid_resolution = 128
     
     contraction_type = ContractionType.AABB
-    scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device='cuda:0')
+    scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=device)
     near_plane = None
     far_plane = None
     render_step_size = (
@@ -70,11 +81,11 @@ def generate():
             roi_aabb=config.AABB,
             resolution=grid_resolution,
             contraction_type=contraction_type,
-        ).to('cuda:0')
+        ).to(device)
     occupancy_grid.eval()
 
     for i in range(100):
-        grid = generate_occupancy_grid('cuda:0', 
+        grid = generate_occupancy_grid2(device, 
                     os.path.join('data', '02691156', '1a04e3eab45ca15dd86060f189eb133', 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth'), 
                     config.INSTANT_NGP_MLP_CONF, 
                     config.AABB, 

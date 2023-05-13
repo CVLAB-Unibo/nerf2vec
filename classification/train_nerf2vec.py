@@ -1,5 +1,6 @@
 import gzip
 import math
+import pickle
 import subprocess
 import time
 import imageio
@@ -79,16 +80,37 @@ class NeRFDataset(Dataset):
                     config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
                     config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
 
+        
+        dict = {
+            'occs': grid.state_dict()['occs'].half(),
+            '_roi_aabb': grid.state_dict()['_roi_aabb'].half(),
+            '_binary': grid.state_dict()['_binary'].to_sparse(),
+            'resolution': grid.state_dict()['resolution'].half()
+        }
+        
+      
+
+        #dict = {key: tensor.to(torch.float16) for key, tensor in grid.state_dict().items()}
+
+        torch.save(dict, 'grid.pth')
+
+        #grid.load_state_dict(dict)
+
         # Save the model in a compressed format
-        torch.save(grid.state_dict(), 'grid.pth')
+        #with gzip.open('grid.pth.gz', 'wb') as f:
+        #    torch.save(dict, f)
         exit()
         """
+        
+        
+        
         
         
 
         # grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
         grid_weights = []
-
+        grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
+        grid_weights['_binary'] = grid_weights['_binary'].to_dense()
 
         return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd, grid_weights
     
@@ -113,7 +135,7 @@ class NeRFDataset(Dataset):
 
 class Nerf2vecTrainer:
     def __init__(self, device='cuda:0') -> None:
-        train_dset = NeRFDataset(os.path.abspath('data'), None, device='cpu') 
+        train_dset = NeRFDataset(os.path.abspath('data'), None, device='cuda:0') 
 
         self.device = device
         
@@ -178,6 +200,7 @@ class Nerf2vecTrainer:
 
         called = False
 
+
         for epoch in range(start_epoch, num_epochs):
 
             self.epoch = epoch
@@ -188,19 +211,21 @@ class Nerf2vecTrainer:
 
             for batch in self.train_loader:
                 
+                """
                 if called == False:
                     called = True
                     script_path = 'grid_script.py'
                     process = subprocess.Popen(['python', script_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                """
 
                 batch_start = time.time()
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
                 # TODO: check rays, it is not created properly
-                rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
-                pixels = pixels.cuda()
-                render_bkgds = render_bkgds.cuda()
-                matrices = matrices.cuda()
+                #rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
+                #pixels = pixels.cuda()
+                #render_bkgds = render_bkgds.cuda()
+                #matrices = matrices.cuda()
 
                 test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
                 test_pixels = test_pixels.cuda()
@@ -219,19 +244,24 @@ class Nerf2vecTrainer:
                         contraction_type=contraction_type,
                     ).to(self.device)
                     occupancy_grid.eval()
-                    '''
-                    c_dict = {}
-                    for key in grid_weights:
-                        c_dict[key] = grid_weights[key][idx].cuda()
-                    occupancy_grid.load_state_dict(c_dict)
+                    
+                    #c_dict = {}
+                    #for key in grid_weights:
+                    #    c_dict[key] = grid_weights[key][idx]
+                    #occupancy_grid.load_state_dict(c_dict)
                         # occupancy_grid.load_state_dict(torch.load(elem))
-                    '''
-                    occupancy_grid.load_state_dict(torch.load('grid.pth'))
+                    
+                    #with gzip.open('grid.pth.gz', 'rb') as f:
+                    #    loaded_dict = torch.load(f)
+                    #    occupancy_grid.load_state_dict(loaded_dict)
+                    # occupancy_grid.load_state_dict(torch.load('grid.pth'))
+
                     # occupancy_grid.eval()
                     grids.append(occupancy_grid)
                 
-                #grid_end = time.time()
-                # print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
+                
+                grid_end = time.time()
+                print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
                 
                 
                 
@@ -251,6 +281,24 @@ class Nerf2vecTrainer:
                 
                 # grids = [None] * config.BATCH_SIZE
                 """
+                """
+                grids = []
+                #grid_start = time.time()
+                for elem in nerf_weights_path:
+                    grid = generate_occupancy_grid2(self.device, 
+                                                elem, 
+                                                config.INSTANT_NGP_MLP_CONF, 
+                                                config.AABB, 
+                                                config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
+                                                config.OCCUPANCY_GRID_WARMUP_ITERATIONS,
+                                                radiance_field,
+                                                occupancy_grid,
+                                                render_step_size)
+                    grids.append(grid)
+                """
+                
+                
+                # grids = [None] * config.BATCH_SIZE
                 
                 
                 

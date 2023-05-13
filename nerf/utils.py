@@ -118,11 +118,11 @@ def render_image(
 
         # Get the minimum size among all tensors, so as to have a tensor that can be passed to the decoder 
         # (i.e., all tensors will have the same dimensions)
-        MIN_SIZE = min([tensor.size(0) for tensor in b_positions])
+        MIN_SIZE = min([tensor.size(0) for tensor in b_t_starts])
         # print(MIN_SIZE)
         
         if radiance_field.training: # Avoid OOM in case of too many rays
-            if MIN_SIZE > 100000:
+            if MIN_SIZE > 1000000000000:
                 MIN_SIZE = 100000
             #if MIN_SIZE > 4096:
             #    MIN_SIZE = 4096
@@ -280,8 +280,8 @@ def generate_occupancy_grid(
         radiance_field.eval()
 
         # Create the OccupancyGrid
-        render_n_samples = 128
-        grid_resolution = 64
+        render_n_samples = 1024
+        grid_resolution = 128
         
         contraction_type = ContractionType.AABB
         scene_aabb = torch.tensor(aabb, dtype=torch.float32, device=device)
