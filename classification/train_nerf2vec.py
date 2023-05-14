@@ -114,9 +114,13 @@ class NeRFDataset(Dataset):
 
 
         # grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
-        #grid_weights = []
-        grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
-        grid_weights['_binary'] = grid_weights['_binary'].to_dense()
+        # grid_weights = []
+        #grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
+        #grid_weights['_binary'] = grid_weights['_binary'].to_dense()
+        
+        grid_weights = os.path.join(data_dir, 'grid.pth')
+        #grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
+        #grid_weights['_binary'] = grid_weights['_binary'].to_dense()
 
         return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd, grid_weights
     
@@ -220,6 +224,10 @@ class Nerf2vecTrainer:
         ).to(self.device)
         occupancy_grid.eval()
 
+        #weights = torch.load('grid.pth')
+        #weights['_binary'] = weights['_binary'].to_dense()
+        # occupancy_grid.load_state_dict(weights)
+
 
         for epoch in range(start_epoch, num_epochs):
             
@@ -231,6 +239,10 @@ class Nerf2vecTrainer:
                 shutil.copy2('grid.pth.gz', os.path.join('zipped_grids', f'grid.pth_{i}.gz'))
             exit()
             """
+
+
+            
+            # OPTIMIZED CODE WHEN BATCH_SIZE 16
             N_CACHED_GRIDS = 512
             if self.global_step % (N_CACHED_GRIDS/config.BATCH_SIZE)  == 0:
                 print('Prepare the grids!')
@@ -262,6 +274,7 @@ class Nerf2vecTrainer:
                 end_unzip=time.time()
                 print(end_unzip-start_unzip)
             
+            
 
             self.epoch = epoch
             self.encoder.train()
@@ -274,15 +287,16 @@ class Nerf2vecTrainer:
                 batch_start = time.time()
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
+                
                 # TODO: check rays, it is not created properly
                 #rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 #pixels = pixels.cuda()
                 #render_bkgds = render_bkgds.cuda()
                 #matrices = matrices.cuda()
 
-                test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
-                test_pixels = test_pixels.cuda()
-                test_render_bkgds = test_render_bkgds.cuda()
+                #test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
+                #test_pixels = test_pixels.cuda()
+                #test_render_bkgds = test_render_bkgds.cuda()
                 
                 
                 """
@@ -336,27 +350,6 @@ class Nerf2vecTrainer:
                 
                 # grids = [None] * config.BATCH_SIZE
                 """
-                """
-                grids = []
-                #grid_start = time.time()
-                for elem in nerf_weights_path:
-                    grid = generate_occupancy_grid2(self.device, 
-                                                elem, 
-                                                config.INSTANT_NGP_MLP_CONF, 
-                                                config.AABB, 
-                                                config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
-                                                config.OCCUPANCY_GRID_WARMUP_ITERATIONS,
-                                                radiance_field,
-                                                occupancy_grid,
-                                                render_step_size)
-                    grids.append(grid)
-                """
-                
-                
-                # grids = [None] * config.BATCH_SIZE
-                
-                
-                
                 
                 #embeddings = self.encoder(matrices)
                 #pred = self.decoder(embeddings, selected_coords)
@@ -416,7 +409,7 @@ class Nerf2vecTrainer:
                 
                 # self.logfn(f'"train/loss": {loss.item()} - elapsed: {end-start}')
                 batch_end = time.time()
-                print(f'{self.global_step} - Single batch: {batch_end-batch_start}')
+                #print(f'{self.global_step} - Single batch: {batch_end-batch_start}')
                 batch_start = time.time()
 
                 if self.global_step % 100 == 0:
@@ -431,33 +424,29 @@ class Nerf2vecTrainer:
                         #render_bkgd = data["color_bkgd"]
                         #rays = data["rays"]
                         #pixels = data["pixels"]
-
-                        c_dict = {}
-                        for key in grid_weights:
-                            c_dict[key] = grid_weights[key][0]
                         
+                        for i in range(config.BATCH_SIZE):
+                            idx_to_draw = i
+                            rgb, acc, depth, n_rendering_samples = render_image(
+                                self.decoder,
+                                embeddings[idx_to_draw].unsqueeze(dim=0),
+                                occupancy_grid,#[grids[idx_to_draw]],
+                                Rays(origins=test_rays.origins[idx_to_draw].unsqueeze(dim=0), viewdirs=test_rays.viewdirs[idx_to_draw].unsqueeze(dim=0)),
+                                scene_aabb,
+                                # rendering options
+                                near_plane=None,
+                                far_plane=None,
+                                render_step_size=render_step_size,
+                                render_bkgd=test_render_bkgds,
+                                cone_angle=0.0,
+                                alpha_thre=alpha_thre,
+                                grid_weights=[grid_weights[i]]
+                            )
 
-                        idx_to_draw = 0
-                        rgb, acc, depth, n_rendering_samples = render_image(
-                            self.decoder,
-                            embeddings[idx_to_draw].unsqueeze(dim=0),
-                            occupancy_grid,#[grids[idx_to_draw]],
-                            Rays(origins=test_rays.origins[idx_to_draw].unsqueeze(dim=0), viewdirs=test_rays.viewdirs[idx_to_draw].unsqueeze(dim=0)),
-                            scene_aabb,
-                            # rendering options
-                            near_plane=None,
-                            far_plane=None,
-                            render_step_size=render_step_size,
-                            render_bkgd=test_render_bkgds,
-                            cone_angle=0.0,
-                            alpha_thre=alpha_thre,
-                            grid_weights=grid_weights
-                        )
-
-                        imageio.imwrite(
-                            os.path.join('temp_sanity_check', f'rgb_test_{self.global_step}.png'),
-                            (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
-                        )
+                            imageio.imwrite(
+                                os.path.join('temp_sanity_check', f'{i}_rgb_test_{self.global_step}.png'),
+                                (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
+                            )
                         
                         
                         """

@@ -40,7 +40,8 @@ def render_image(
     render_step_size: float = 1e-3,
     render_bkgd: Optional[torch.Tensor] = None,  # This should be [batch_size, render_bkgds]
     cone_angle: float = 0.0,
-    alpha_thre: float = 0.0
+    alpha_thre: float = 0.0,
+    grid_weights:dict = None
 ):
     """Render the pixels of an image."""
 
@@ -83,21 +84,25 @@ def render_image(
         # Compute the positions for all the elements in the batch.
         # These position will be used for calling the decoder.
         for batch_idx in range(batch_size):
+            
+            
+            #c_dict = {}
+            #for key in grid_weights:
+            #    c_dict[key] = grid_weights[key][batch_idx]
+            #occupancy_grid.load_state_dict(c_dict)
+            
 
-            """
-            The ray_marching internally calls sigma_fn that, for the moment, has not be used.
-            This because:
-             - it is an optimization that, hopefully, can be skipped. By testing some models, it seems that they can be trained also without it.
-             - it requires the value 'packed_info', which is returned from the ray marching algorithm, and it is not exposed to external callers.
-            See the ray_marching.py file, at the end it uses this variable.
 
-            Moreover, this avoids an additional call to the model (i.e., the nerf2vec decoder)
-            """
+            # grid_weights = torch.load('grid.pth')
+            weights = torch.load(grid_weights[batch_idx])
+            weights['_binary'] = weights['_binary'].to_dense()
+            occupancy_grid.load_state_dict(weights)
+            
             ray_indices, t_starts, t_ends = ray_marching(
                 chunk_rays.origins[batch_idx],  # [batch_size, chunk, 3d coord]
                 chunk_rays.viewdirs[batch_idx], # [batch_size, chunk, 3d coord]
                 scene_aabb=scene_aabb, 
-                grid=occupancy_grid[batch_idx], # [batch_size, occupancy_grids]
+                grid=occupancy_grid, # occupancy_grid[batch_idx], # [batch_size, occupancy_grids]
                 sigma_fn=None,#sigma_fn,
                 near_plane=near_plane,
                 far_plane=far_plane,
@@ -148,19 +153,26 @@ def render_image(
         """
 
 
-        # ################################################################################
-        # RENDER VISIBILITY
-        # ################################################################################
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
         b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
         b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
         b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
         
+        # ################################################################################
+        # RENDER VISIBILITY
+        # ################################################################################
+        """
+            The ray_marching internally calls sigma_fn that, for the moment, has not be used.
+            This because:
+             - it is an optimization that, hopefully, can be skipped. By testing some models, it seems that they can be trained also without it.
+             - it requires the value 'packed_info', which is returned from the ray marching algorithm, and it is not exposed to external callers.
+            See the ray_marching.py file, at the end it uses this variable.
+
+            Moreover, this avoids an additional call to the model (i.e., the nerf2vec decoder)
+        """
+        """
         curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions)
 
-
-
-        
         b_t_starts_visible = []
         b_t_ends_visible = []
         b_ray_indices_visible = []
@@ -205,7 +217,7 @@ def render_image(
         
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
         
-
+        """
 
         # ################################################################################
         # VOLUME RENDERING
