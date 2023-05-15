@@ -26,7 +26,11 @@ def set_random_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-
+def log_message(message):
+    LOG_ENABLED = False
+    if LOG_ENABLED:
+        print(message)
+    
 def render_image(
     # scene
     radiance_field: torch.nn.Module,             # This should be the DECODER
@@ -71,7 +75,7 @@ def render_image(
         if radiance_field.training
         else 4096
     )
-    
+    log_message('*'*40)
     # start_time = time.time()
     for i in range(0, num_rays, chunk):
         chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)
@@ -83,6 +87,7 @@ def render_image(
 
         # Compute the positions for all the elements in the batch.
         # These position will be used for calling the decoder.
+        ray_start = time.time()
         for batch_idx in range(batch_size):
             
             
@@ -90,14 +95,16 @@ def render_image(
             #for key in grid_weights:
             #    c_dict[key] = grid_weights[key][batch_idx]
             #occupancy_grid.load_state_dict(c_dict)
-            
 
+            load_start = time.time()
 
-            # grid_weights = torch.load('grid.pth')
             weights = torch.load(grid_weights[batch_idx])
             weights['_binary'] = weights['_binary'].to_dense()
             occupancy_grid.load_state_dict(weights)
+            load_end = time.time()
+            log_message(f'\t====>load: {load_end-load_start}')
             
+            ray_alg_start = time.time()
             ray_indices, t_starts, t_ends = ray_marching(
                 chunk_rays.origins[batch_idx],  # [batch_size, chunk, 3d coord]
                 chunk_rays.viewdirs[batch_idx], # [batch_size, chunk, 3d coord]
@@ -111,6 +118,8 @@ def render_image(
                 cone_angle=cone_angle,
                 alpha_thre=alpha_thre,
             )
+            ray_alg_end = time.time()
+            log_message(f'\t====>ray alg: {ray_alg_end-ray_alg_start}')
 
             b_t_starts.append(t_starts)
             b_t_ends.append(t_ends)
@@ -120,7 +129,12 @@ def render_image(
             t_dirs = chunk_rays.viewdirs[batch_idx][ray_indices]
             positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
             b_positions.append(positions)
+        
+        ray_end = time.time()
+        log_message(f'ray: {ray_end - ray_start}')
 
+
+        min_start = time.time()
         # Get the minimum size among all tensors, so as to have a tensor that can be passed to the decoder 
         # (i.e., all tensors will have the same dimensions)
         MIN_SIZE = min([tensor.size(0) for tensor in b_t_starts])
@@ -152,12 +166,15 @@ def render_image(
         b_ray_indices = torch.stack(b_ray_indices, dim=0)
         """
 
+        min_start = time.time()
 
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
         b_t_starts = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_starts], dim=0)
         b_t_ends = torch.stack([tensor[:MIN_SIZE] for tensor in b_t_ends], dim=0)
         b_ray_indices = torch.stack([tensor[:MIN_SIZE] for tensor in b_ray_indices], dim=0)
         
+        min_end = time.time()
+        log_message(f'ray: {min_end - min_start}')
         # ################################################################################
         # RENDER VISIBILITY
         # ################################################################################
@@ -170,9 +187,12 @@ def render_image(
 
             Moreover, this avoids an additional call to the model (i.e., the nerf2vec decoder)
         """
-        """
+        sigmas_start = time.time()
         curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions)
+        sigmas_end = time.time()
+        log_message(f'sigmas: {sigmas_end - sigmas_start}')
 
+        render_visibility_start = time.time()
         b_t_starts_visible = []
         b_t_ends_visible = []
         b_ray_indices_visible = []
@@ -198,6 +218,9 @@ def render_image(
             #b_t_starts[batch_idx] = b_t_starts[batch_idx][masks]
             #b_t_ends[batch_idx] = b_t_ends[batch_idx][masks]
         
+        render_visibility_end = time.time()
+        log_message(f'render visiblity: {render_visibility_end-render_visibility_start}')
+
         # Recompute the min size, so as to have again a tensor that can be passed to the decoder
         # (i.e., equal sizes in all the elements in the batch)
         MIN_SIZE = min([tensor.size(0) for tensor in b_t_starts_visible])
@@ -217,13 +240,14 @@ def render_image(
         
         b_positions = torch.stack([tensor[:MIN_SIZE] for tensor in b_positions], dim=0)
         
-        """
+        
 
         # ################################################################################
         # VOLUME RENDERING
         # ################################################################################
         curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions)
         
+        volume_rendering_start = time.time()
         
         for curr_batch_idx in range(batch_size):
             rgb, opacity, depth = rendering(
@@ -268,6 +292,11 @@ def render_image(
     depths = torch.stack(depths, dim=0).view((*rays_shape[:-1], -1))
     n_rendering_samples = [elem[0] for elem in n_rendering_samples]
     
+    volume_rendering_end = time.time()
+
+    log_message(f'volume rendering: {volume_rendering_end-volume_rendering_start}')
+    log_message('*'*40)
+    log_message('\n')
     
     # end_time = time.time()
     # print(f'\t Passing data through encoder/decoder required: {end_time - start_time}')

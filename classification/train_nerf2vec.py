@@ -74,6 +74,7 @@ class NeRFDataset(Dataset):
         test_render_bkgd = test_data["color_bkgd"]
         test_rays = test_data["rays"]
         test_pixels = test_data["pixels"]
+        
 
         
         """
@@ -118,11 +119,14 @@ class NeRFDataset(Dataset):
         #grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
         #grid_weights['_binary'] = grid_weights['_binary'].to_dense()
         
-        grid_weights = os.path.join(data_dir, 'grid.pth')
-        #grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
+        #with gzip.open(file_path, 'rb') as f:
+        #state_dict = torch.load(f, map_location=torch.device('cpu'))
+
+        grid_weights_path = os.path.join(data_dir, 'grid.pth')
+        #grid_weights = torch.load(grid_weights_path, map_location=torch.device(self.device))
         #grid_weights['_binary'] = grid_weights['_binary'].to_dense()
 
-        return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd, grid_weights
+        return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd, grid_weights_path
     
     
     def _get_nerf_paths(self, nerfs_root: str):
@@ -152,15 +156,15 @@ def unzip_file(file_path, extract_dir):
 
 class Nerf2vecTrainer:
     def __init__(self, device='cuda:0') -> None:
-        train_dset = NeRFDataset(os.path.abspath('data'), None, device='cuda:0') 
+        train_dset = NeRFDataset(os.path.abspath('data'), None, device='cpu') 
 
         self.device = device
         
         self.train_loader = DataLoader(
             train_dset,
             batch_size=config.BATCH_SIZE,
-            num_workers=0,#4,
-            shuffle=False#True
+            num_workers=8,#4,
+            shuffle=True#True
         )
         
         encoder = Encoder(
@@ -228,6 +232,46 @@ class Nerf2vecTrainer:
         #weights['_binary'] = weights['_binary'].to_dense()
         # occupancy_grid.load_state_dict(weights)
 
+        render_n_samples = 1024
+        scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
+        render_step_size = (
+            (scene_aabb[3:] - scene_aabb[:3]).max()
+            * math.sqrt(3)
+            / render_n_samples
+        ).item()
+        alpha_thre = 0.0
+
+        # OPTIMIZED CODE WHEN BATCH_SIZE 16
+        N_CACHED_GRIDS = 512
+        if self.global_step % (N_CACHED_GRIDS/config.BATCH_SIZE)  == 0:
+            print('Prepare the grids!')
+            start_unzip = time.time()
+            shutil.rmtree('grids')
+            path = Path('grids')
+            path.mkdir(parents=True, exist_ok=True)
+            
+            folder_path = 'zipped_grids'  # Replace with the path to the folder containing the zip files
+            extract_dir = 'grids'  # Replace with the desired extraction directory
+
+            # Get a list of GZ files in the folder
+            gz_files = [file for file in os.listdir(folder_path) if file.endswith('.gz')][:N_CACHED_GRIDS]
+
+            # Create a pool of worker processes
+            pool = multiprocessing.Pool()
+
+            # Unzip files in parallel
+            for gz_file in gz_files:
+                file_path = os.path.join(folder_path, gz_file)
+                pool.apply_async(unzip_file, args=(file_path, extract_dir))
+
+            # Close the pool and wait for the processes to complete
+            pool.close()
+            pool.join()
+
+            end_unzip=time.time()
+            print(end_unzip-start_unzip)
+
+
 
         for epoch in range(start_epoch, num_epochs):
             
@@ -240,42 +284,6 @@ class Nerf2vecTrainer:
             exit()
             """
 
-
-            
-            # OPTIMIZED CODE WHEN BATCH_SIZE 16
-            N_CACHED_GRIDS = 512
-            if self.global_step % (N_CACHED_GRIDS/config.BATCH_SIZE)  == 0:
-                print('Prepare the grids!')
-                start_unzip = time.time()
-                shutil.rmtree('grids')
-                path = Path('grids')
-                path.mkdir(parents=True, exist_ok=True)
-                
-                folder_path = 'zipped_grids'  # Replace with the path to the folder containing the zip files
-                extract_dir = 'grids'  # Replace with the desired extraction directory
-
-                # Get a list of GZ files in the folder
-                gz_files = [file for file in os.listdir(folder_path) if file.endswith('.gz')][N_CACHED_GRIDS]
-
-                # Create a pool of worker processes
-                pool = multiprocessing.Pool()
-
-                # Unzip files in parallel
-                for gz_file in gz_files:
-                    file_path = os.path.join(folder_path, gz_file)
-                    pool.apply_async(unzip_file, args=(file_path, extract_dir))
-
-                # Close the pool and wait for the processes to complete
-                pool.close()
-                pool.join()
-
-
-
-                end_unzip=time.time()
-                print(end_unzip-start_unzip)
-            
-            
-
             self.epoch = epoch
             self.encoder.train()
             self.decoder.train()
@@ -283,16 +291,18 @@ class Nerf2vecTrainer:
             desc = f"Epoch {epoch}/{num_epochs}"
 
             for batch in self.train_loader:
-                
+
                 batch_start = time.time()
+
+
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
                 
                 # TODO: check rays, it is not created properly
-                #rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
-                #pixels = pixels.cuda()
-                #render_bkgds = render_bkgds.cuda()
-                #matrices = matrices.cuda()
+                rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
+                pixels = pixels.cuda()
+                render_bkgds = render_bkgds.cuda()
+                matrices = matrices.cuda()
 
                 #test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
                 #test_pixels = test_pixels.cuda()
@@ -356,15 +366,7 @@ class Nerf2vecTrainer:
                 # embeddings = torch.rand(config.BATCH_SIZE, config.ENCODER_EMBEDDING_DIM).cuda() # TODO: This is the output of the encoder!
                 embeddings = self.encoder(matrices)
                 
-                render_n_samples = 1024
-                scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
-                render_step_size = (
-                    (scene_aabb[3:] - scene_aabb[:3]).max()
-                    * math.sqrt(3)
-                    / render_n_samples
-                ).item()
-                alpha_thre = 0.0
-
+                
                 # start_time = time.time()
                 rgb, acc, depth, n_rendering_samples = render_image(
                     self.decoder,
@@ -425,6 +427,7 @@ class Nerf2vecTrainer:
                         #rays = data["rays"]
                         #pixels = data["pixels"]
                         
+                        """
                         for i in range(config.BATCH_SIZE):
                             idx_to_draw = i
                             rgb, acc, depth, n_rendering_samples = render_image(
@@ -447,6 +450,8 @@ class Nerf2vecTrainer:
                                 os.path.join('temp_sanity_check', f'{i}_rgb_test_{self.global_step}.png'),
                                 (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
                             )
+                        """
+                        
                         
                         
                         """
