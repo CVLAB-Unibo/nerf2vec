@@ -109,20 +109,19 @@ class NeRFDataset(Dataset):
         exit()
         """
         
-        # with gzip.open('grid.pth.gz', 'rb') as f:
-        #    grid_weights = torch.load(f)
         
-
-
-        # grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
-        # grid_weights = []
-        #grid_weights = torch.load('grid.pth', map_location=torch.device(self.device))
-        #grid_weights['_binary'] = grid_weights['_binary'].to_dense()
+        """
+        with gzip.open(os.path.join(data_dir, 'grid.pth.gz'), 'rb') as f:
+            grid_weights = torch.load(f, map_location=torch.device(self.device))
+            grid_weights['_binary'] = grid_weights['_binary'].to_dense()
+        """
+        #zipped_file_path = os.path.join(data_dir, 'grid.pth.gz')
+        #with gzip.open(zipped_file_path, 'rb') as f_in, open(os.path.join('grids', f'grid_{index}.pth'), 'wb') as f_out:
+        #    shutil.copyfileobj(f_in, f_out)
         
-        #with gzip.open(file_path, 'rb') as f:
-        #state_dict = torch.load(f, map_location=torch.device('cpu'))
-
         grid_weights_path = os.path.join(data_dir, 'grid.pth')
+
+        
         #grid_weights = torch.load(grid_weights_path, map_location=torch.device(self.device))
         #grid_weights['_binary'] = grid_weights['_binary'].to_dense()
 
@@ -164,7 +163,9 @@ class Nerf2vecTrainer:
             train_dset,
             batch_size=config.BATCH_SIZE,
             num_workers=8,#4,
-            shuffle=True#True
+            shuffle=True,
+            #prefetch_factor=8,
+            persistent_workers=True
         )
         
         encoder = Encoder(
@@ -241,35 +242,6 @@ class Nerf2vecTrainer:
         ).item()
         alpha_thre = 0.0
 
-        # OPTIMIZED CODE WHEN BATCH_SIZE 16
-        N_CACHED_GRIDS = 512
-        if self.global_step % (N_CACHED_GRIDS/config.BATCH_SIZE)  == 0:
-            print('Prepare the grids!')
-            start_unzip = time.time()
-            shutil.rmtree('grids')
-            path = Path('grids')
-            path.mkdir(parents=True, exist_ok=True)
-            
-            folder_path = 'zipped_grids'  # Replace with the path to the folder containing the zip files
-            extract_dir = 'grids'  # Replace with the desired extraction directory
-
-            # Get a list of GZ files in the folder
-            gz_files = [file for file in os.listdir(folder_path) if file.endswith('.gz')][:N_CACHED_GRIDS]
-
-            # Create a pool of worker processes
-            pool = multiprocessing.Pool()
-
-            # Unzip files in parallel
-            for gz_file in gz_files:
-                file_path = os.path.join(folder_path, gz_file)
-                pool.apply_async(unzip_file, args=(file_path, extract_dir))
-
-            # Close the pool and wait for the processes to complete
-            pool.close()
-            pool.join()
-
-            end_unzip=time.time()
-            print(end_unzip-start_unzip)
 
 
 
@@ -289,24 +261,67 @@ class Nerf2vecTrainer:
             self.decoder.train()
 
             desc = f"Epoch {epoch}/{num_epochs}"
-
+            print(f'epoch {epoch} started...')
+            
+            
             for batch in self.train_loader:
+                
+                
+
+
+                
+               
+                
+
+                """
+                # OPTIMIZED CODE WHEN BATCH_SIZE 16
+                N_CACHED_GRIDS = 512
+                if self.global_step % (N_CACHED_GRIDS/config.BATCH_SIZE)  == 0:
+                    print('Prepare the grids!')
+                    start_unzip = time.time()
+                    shutil.rmtree('grids')
+                    path = Path('grids')
+                    path.mkdir(parents=True, exist_ok=True)
+                    
+                    folder_path = 'zipped_grids'  # Replace with the path to the folder containing the zip files
+                    extract_dir = 'grids'  # Replace with the desired extraction directory
+
+                    # Get a list of GZ files in the folder
+                    gz_files = [file for file in os.listdir(folder_path) if file.endswith('.gz')][:N_CACHED_GRIDS]
+
+                    # Create a pool of worker processes
+                    pool = multiprocessing.Pool()
+
+                    # Unzip files in parallel
+                    for gz_file in gz_files:
+                        file_path = os.path.join(folder_path, gz_file)
+                        pool.apply_async(unzip_file, args=(file_path, extract_dir))
+
+                    # Close the pool and wait for the processes to complete
+                    pool.close()
+                    pool.join()
+
+                end_unzip=time.time()
+                print(end_unzip-start_unzip)
+                """
+
 
                 batch_start = time.time()
 
 
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
-                
+
+
                 # TODO: check rays, it is not created properly
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 pixels = pixels.cuda()
                 render_bkgds = render_bkgds.cuda()
                 matrices = matrices.cuda()
 
-                #test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
-                #test_pixels = test_pixels.cuda()
-                #test_render_bkgds = test_render_bkgds.cuda()
+                test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
+                test_pixels = test_pixels.cuda()
+                test_render_bkgds = test_render_bkgds.cuda()
                 
                 
                 """
@@ -450,8 +465,8 @@ class Nerf2vecTrainer:
                                 os.path.join('temp_sanity_check', f'{i}_rgb_test_{self.global_step}.png'),
                                 (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
                             )
-                        """
                         
+                        """
                         
                         
                         """
@@ -481,8 +496,9 @@ class Nerf2vecTrainer:
                     self.encoder.train()
                     self.decoder.train()
                     
-                    
+                
                 self.global_step += 1
+                print(f'{self.global_step}')    
 
 
 

@@ -1,3 +1,5 @@
+import gzip
+import io
 import math
 import random
 import time
@@ -96,13 +98,19 @@ def render_image(
             #    c_dict[key] = grid_weights[key][batch_idx]
             #occupancy_grid.load_state_dict(c_dict)
 
-            load_start = time.time()
-
+            
             weights = torch.load(grid_weights[batch_idx])
             weights['_binary'] = weights['_binary'].to_dense()
             occupancy_grid.load_state_dict(weights)
-            load_end = time.time()
-            log_message(f'\t====>load: {load_end-load_start}')
+
+            """
+            with gzip.open(f'{grid_weights[batch_idx]}.gz', 'rb') as f:
+                buffer = io.BytesIO(f.read())
+                state_dict = torch.load(buffer, map_location=torch.device('cpu'))
+                state_dict['_binary'] = state_dict['_binary'].to_dense()
+            occupancy_grid.load_state_dict(state_dict)
+            """
+            
             
             ray_alg_start = time.time()
             ray_indices, t_starts, t_ends = ray_marching(
