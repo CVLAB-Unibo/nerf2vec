@@ -191,7 +191,7 @@ class Nerf2vecTrainer:
     def unzip_occupancy_grids(self, batch_idx: int, all_indices: List[int], nerf_paths: List[str], unzip_folder='grids'):
         N_CACHED_GRIDS = 512
         if batch_idx == 0 or batch_idx % (N_CACHED_GRIDS/config.BATCH_SIZE) == 0: 
-            self.logfn('Prepare the grids!')
+            self.logfn('Grid unzip started...')
             start_unzip = time.time()
             
             shutil.rmtree(unzip_folder)
@@ -429,14 +429,18 @@ class Nerf2vecTrainer:
                 self.global_step += 1
                 # print(self.global_step)
 
-            """
+            
             if epoch % 10 == 0 or epoch == num_epochs - 1:
 
                 # TODO: The non-shuffled version could be created only once
                 # validation_loader, validation_indices = self.create_data_loader(self.val_dset, shuffle=False)
                 # validation_loader_shuffled, validation_indices_shuffled = self.create_data_loader(self.val_dset, shuffle=False)
 
-                self.val(train_loader, indices=train_indices, nerf_paths=self.train_dset.nerf_paths)
+                self.val(loader=train_loader, 
+                         all_indices=train_indices, 
+                         nerf_paths=self.train_dset.nerf_paths, 
+                         split='train')
+                
                 # self.val("val")
                 # self.plot("train")
                 # self.plot("val")
@@ -445,7 +449,7 @@ class Nerf2vecTrainer:
                 self.save_ckpt(all=True)
             
             self.save_ckpt()
-            """
+            
             
             epoch_end = time.time()
             print(f'Epoch {epoch} completed in {epoch_end-epoch_start}s. Processed {elem_per_batch} elements')        
@@ -453,8 +457,6 @@ class Nerf2vecTrainer:
     @torch.no_grad()
     def val(self, loader: DataLoader, all_indices: List[int], nerf_paths: List[str], split: str) -> None:
         
-        
-
         self.encoder.eval()
         self.decoder.eval()
 
@@ -490,7 +492,7 @@ class Nerf2vecTrainer:
 
             # TODO: evaluate whether to add this condition or not
             if 0 in n_rendering_samples:
-                print(f'0 n_rendering_samples. Skip iteration.')
+                self.logfn(f'ERROR: 0 n_rendering_samples. Skip iteration.')
                 continue
 
             mse = F.mse_loss(rgb, pixels)
@@ -512,7 +514,7 @@ class Nerf2vecTrainer:
             "encoder": self.encoder.state_dict(),
             "decoder": self.decoder.state_dict(),
             "optimizer": self.optimizer.state_dict(),
-            "best_chamfer": self.best_chamfer,
+            "best_psnr": self.best_psnr,
         }
 
         if all:
@@ -544,7 +546,7 @@ class Nerf2vecTrainer:
 
             self.epoch = ckpt["epoch"] + 1
             self.global_step = self.epoch * len(self.train_loader)
-            self.best_chamfer = ckpt["best_chamfer"]
+            self.best_psnr = ckpt["best_psnr"]
 
             self.encoder.load_state_dict(ckpt["encoder"])
             self.decoder.load_state_dict(ckpt["decoder"])

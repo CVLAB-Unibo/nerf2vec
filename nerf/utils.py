@@ -65,7 +65,7 @@ def render_image(
     
     chunk = (
         torch.iinfo(torch.int32).max
-        if radiance_field.training
+        if radiance_field.training or batch_size > 1
         else 8192
     )
     
@@ -112,14 +112,11 @@ def render_image(
                 positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
                 b_positions.append(positions)
                         
-    
-            #if radiance_field.training:
-            #    print(f'rays: {b_positions[batch_idx].size(0)}')
 
             MAX_SIZE = 35000  # Desired maximum size  # TODO: add a configuration variable
             padding_masks = [None]*batch_size
 
-            if radiance_field.training:
+            if radiance_field.training or batch_size > 1:
                 for batch_idx in range(batch_size):
 
                     # PADDING
