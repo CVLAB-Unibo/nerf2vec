@@ -129,8 +129,12 @@ def render_image(
                         initial_size = b_positions[batch_idx].size(0)
                         padding_size = MAX_SIZE - initial_size
 
-                        # Add 0-values at the end of each tensor
-                        b_positions[batch_idx] = F.pad(b_positions[batch_idx], pad=(0, 0, 0, padding_size))
+                        # Add padding
+                        '''
+                        For the positions pad with a value that is outside the bbox. This will force the decoder to consider
+                        these points with density equal to 0, and they will not have any relevance in the computation of the loss.
+                        '''
+                        b_positions[batch_idx] = F.pad(b_positions[batch_idx], pad=(0, 0, 0, padding_size), value=0.8)  
                         b_t_starts[batch_idx] = F.pad(b_t_starts[batch_idx], pad=(0, 0, 0, padding_size))
                         b_t_ends[batch_idx] = F.pad(b_t_ends[batch_idx], pad=(0, 0, 0, padding_size))
                         b_ray_indices[batch_idx] = F.pad(b_ray_indices[batch_idx], pad=(0, padding_size))

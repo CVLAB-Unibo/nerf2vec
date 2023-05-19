@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import random
 
 
 def cycle_path(nerfs_root):
@@ -50,6 +51,8 @@ def create():
 
             # Get elements related to the current class
             class_elements = nerfs_dict[class_name]
+            random.shuffle(class_elements)
+            
             n_elements = len(class_elements)
 
             # Define the dimensions of the splits

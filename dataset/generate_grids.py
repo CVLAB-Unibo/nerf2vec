@@ -73,6 +73,9 @@ def start_grids_generation(nerf_root):
 
     start_time = time.time()
 
+    to_skip = ['/media/data4TB/sirocchi/nerfacc_nerf2vec/data_TRAINED_A1/02691156/604392af2cbb7d1fe30ec10233e7931a_A1']
+    to_skip = []
+
     for class_name in os.listdir(nerf_root):
 
         subject_dirs = os.path.join(nerf_root, class_name)
@@ -91,13 +94,19 @@ def start_grids_generation(nerf_root):
             grid_compressed_dir = os.path.join(subject_dir, compressed_grid_file_name)
             if os.path.exists(grid_compressed_dir):
                 print('ALREADY EXISTS!')
+            elif not os.path.exists(weights_dir):
+                with open(os.path.join('dataset', 'error_log.txt'), 'a') as f:
+                    f.write(f'weights not found: {subject_dir}\n')
+            elif subject_dir in to_skip:
+                with open(os.path.join('dataset', 'error_log.txt'), 'a') as f:
+                    f.write(f'skipped: {subject_dir}\n')
             else:
                 grid = generate_occupancy_grid(
                     device=device,
                     weights_path=weights_dir,
-                    aabb=config.AABB,
-                    n_iterations=config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS,
-                    n_warmups=config.OCCUPANCY_GRID_WARMUP_ITERATIONS,
+                    aabb=config.GRID_AABB,
+                    n_iterations=config.GRID_RECONSTRUCTION_TOTAL_ITERATIONS,
+                    n_warmups=config.GRID_RECONSTRUCTION_WARMUP_ITERATIONS,
                     radiance_field=radiance_field
                 )
 

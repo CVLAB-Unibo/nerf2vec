@@ -27,6 +27,24 @@ from typing import Any, Dict
 from classification import config
 from nerf.utils import Rays, render_image
 
+
+def get_grid_file_name(file_path):
+    # Split the path into individual directories
+    directories = os.path.normpath(file_path).split(os.sep)
+    # Get the last two directories
+    last_two_dirs = directories[-2:]
+    # Join the last two directories with an underscore
+    file_name = '_'.join(last_two_dirs) + '.pth'
+    return file_name
+
+
+def unzip_file(file_path, extract_dir, file_name):
+    with gzip.open(os.path.join(file_path, 'grid.pth.gz'), 'rb') as f_in:
+        output_path = os.path.join(extract_dir, file_name) 
+        with open(output_path, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+
 class NeRFDataset(Dataset):
     def __init__(self, nerfs_root: str, sample_sd: Dict[str, Any], device: str) -> None:
         super().__init__()
@@ -93,45 +111,29 @@ class NeRFDataset(Dataset):
         return nerf_paths
 
 
-def get_grid_file_name(file_path):
-    # Split the path into individual directories
-    directories = os.path.normpath(file_path).split(os.sep)
-    # Get the last two directories
-    last_two_dirs = directories[-2:]
-    # Join the last two directories with an underscore
-    file_name = '_'.join(last_two_dirs) + '.pth'
-    return file_name
+class CyclicIndexIterator:
+    def __init__(self, indices):
+        self.indices = indices
 
+    def __iter__(self):
+        return iter(self.indices)
 
-def unzip_file(file_path, extract_dir, file_name):
-    with gzip.open(os.path.join(file_path, 'grid.pth.gz'), 'rb') as f_in:
-        #file_name = os.path.basename(file_path)
-        # output_path = os.path.join(extract_dir, file_name[:-3])  # Remove the .gz extension
-        output_path = os.path.join(extract_dir, file_name)  # Remove the .gz extension
-        with open(output_path, 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
-
-
+    def __len__(self):
+        return len(self.indices)
+    
+    
 class Nerf2vecTrainer:
     def __init__(self, device='cuda:0') -> None:
         self.train_dset = NeRFDataset(os.path.abspath('data'), None, device='cpu') 
 
         self.device = device
         
-        self.train_loader = DataLoader(
-            self.train_dset,
-            batch_size=config.BATCH_SIZE,
-            num_workers=8,#4,
-            shuffle=True,
-            persistent_workers=True
-        )
-        
         encoder = Encoder(
             config.MLP_UNITS,
             config.ENCODER_HIDDEN_DIM,
             config.ENCODER_EMBEDDING_DIM
         )
-        self.encoder = encoder.cuda()
+        self.encoder = encoder.to(self.device)
 
         decoder = ImplicitDecoder(
             embed_dim=config.ENCODER_EMBEDDING_DIM,
@@ -141,9 +143,24 @@ class Nerf2vecTrainer:
             num_hidden_layers_after_skip=config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
             out_dim=config.DECODER_OUT_DIM,
             encoding_conf=config.INSTANT_NGP_ENCODING_CONF,
-            aabb=torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
+            aabb=torch.tensor(config.GRID_AABB, dtype=torch.float32, device=self.device)
         )
-        self.decoder = decoder.cuda()
+        self.decoder = decoder.to(self.device)
+
+        occupancy_grid = OccupancyGrid(
+            roi_aabb=config.GRID_AABB,
+            resolution=config.GRID_RESOLUTION,
+            contraction_type=config.GRID_CONTRACTION_TYPE,
+        )
+        self.occupancy_grid = occupancy_grid.to(self.device)
+        self.occupancy_grid.eval()
+
+        self.scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=self.device)
+        self.render_step_size = (
+            (self.scene_aabb[3:] - self.scene_aabb[:3]).max()
+            * math.sqrt(3)
+            / config.GRID_CONFIG_N_SAMPLES
+        ).item()
 
         lr = config.LR
         wd = config.WD
@@ -178,37 +195,9 @@ class Nerf2vecTrainer:
 
         start = time.time()
 
-        grid_resolution = 128
-        contraction_type = ContractionType.AABB
-        occupancy_grid = OccupancyGrid(
-            roi_aabb=config.AABB,
-            resolution=grid_resolution,
-            contraction_type=contraction_type,
-        ).to(self.device)
-        occupancy_grid.eval()
-
-        render_n_samples = 1024
-        scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
-        render_step_size = (
-            (scene_aabb[3:] - scene_aabb[:3]).max()
-            * math.sqrt(3)
-            / render_n_samples
-        ).item()
-        alpha_thre = 0.0
-
         for epoch in range(start_epoch, num_epochs):
 
             num_samples = len(self.train_dset)
-
-            class CyclicIndexIterator:
-                def __init__(self, indices):
-                    self.indices = indices
-
-                def __iter__(self):
-                    return iter(self.indices)
-
-                def __len__(self):
-                    return len(self.indices)
 
             # Create a list of all possible indices
             all_indices = list(range(num_samples))
@@ -308,16 +297,16 @@ class Nerf2vecTrainer:
                 rgb, acc, depth, n_rendering_samples = render_image(
                     self.decoder,
                     embeddings,
-                    occupancy_grid,
+                    self.occupancy_grid,
                     rays,
-                    scene_aabb,
+                    self.scene_aabb,
                     # rendering options
                     near_plane=None,
                     far_plane=None,
-                    render_step_size=render_step_size,
+                    render_step_size=self.render_step_size,
                     render_bkgd=render_bkgds,
                     cone_angle=0.0,
-                    alpha_thre=alpha_thre,
+                    alpha_thre=0.0,
                     grid_weights=grid_weights
                 )
 
@@ -348,16 +337,16 @@ class Nerf2vecTrainer:
                             rgb, acc, depth, n_rendering_samples = render_image(
                                 self.decoder,
                                 embeddings[idx_to_draw].unsqueeze(dim=0),
-                                occupancy_grid,#[grids[idx_to_draw]],
+                                self.occupancy_grid,#[grids[idx_to_draw]],
                                 Rays(origins=test_rays.origins[idx_to_draw].unsqueeze(dim=0), viewdirs=test_rays.viewdirs[idx_to_draw].unsqueeze(dim=0)),
-                                scene_aabb,
+                                self.scene_aabb,
                                 # rendering options
                                 near_plane=None,
                                 far_plane=None,
-                                render_step_size=render_step_size,
+                                render_step_size=self.render_step_size,
                                 render_bkgd=test_render_bkgds,
                                 cone_angle=0.0,
-                                alpha_thre=alpha_thre,
+                                alpha_thre=0.0,
                                 grid_weights=[grid_weights[i]]
                             )
 
@@ -392,16 +381,16 @@ class Nerf2vecTrainer:
                             rgb, acc, depth, n_rendering_samples = render_image(
                                 self.decoder,
                                 embeddings[idx_to_draw].unsqueeze(dim=0),
-                                occupancy_grid,#[grids[idx_to_draw]],
+                                self.occupancy_grid,
                                 Rays(origins=test_rays_2.origins.unsqueeze(dim=0), viewdirs=test_rays_2.viewdirs.unsqueeze(dim=0)),
-                                scene_aabb,
+                                self.scene_aabb,
                                 # rendering options
                                 near_plane=None,
                                 far_plane=None,
-                                render_step_size=render_step_size,
+                                render_step_size=self.render_step_size,
                                 render_bkgd=test_render_bkgds,
                                 cone_angle=0.0,
-                                alpha_thre=alpha_thre,
+                                alpha_thre=0.0,
                                 grid_weights=[grid_weights[idx_to_draw]]
                             )
 

@@ -1,5 +1,10 @@
-#
+"""
+# ####################
 # NERF2VEC
+# ####################
+"""
+#
+# DIMENSIONS
 #
 ENCODER_EMBEDDING_DIM = 1024
 ENCODER_HIDDEN_DIM = [256, 256, 512, 512]
@@ -15,19 +20,31 @@ DECODER_OUT_DIM = 4
 # TRAIN
 #
 NUM_EPOCHS = 2100
-BATCH_SIZE = 32
+BATCH_SIZE = 4
 LR = 1e-3
 WD = 1e-2
 
-#
+"""
+# ####################
 # NERFACC
+# ####################
+"""
 #
-AABB = [-0.7, -0.7, -0.7, 0.7, 0.7, 0.7]
+# GRID
+#
+from nerfacc import ContractionType
+GRID_AABB = [-0.7, -0.7, -0.7, 0.7, 0.7, 0.7]
+GRID_RESOLUTION = 128
+GRID_CONTRACTION_TYPE = ContractionType.AABB
+GRID_CONFIG_N_SAMPLES = 1024
 
+GRID_RECONSTRUCTION_TOTAL_ITERATIONS = 20
+GRID_RECONSTRUCTION_WARMUP_ITERATIONS = 5
+
+#
+# RAYS
+#
 NUM_RAYS = 8192
-
-OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS = 20
-OCCUPANCY_GRID_WARMUP_ITERATIONS = 5
 
 #
 # INSTANT-NGP 
@@ -40,7 +57,7 @@ MLP_HIDDEN_LAYERS = 3
 MLP_UNITS = 64
 
 INSTANT_NGP_MLP_CONF = {
-    'aabb': AABB,
+    'aabb': GRID_AABB,
     'unbounded':False,
     'encoding':'Frequency',
     'mlp':'FullyFusedMLP',
@@ -55,7 +72,7 @@ INSTANT_NGP_ENCODING_CONF = {
     "n_frequencies": 24
 }
 
-# 
+#
 # TINY-CUDA
 #
 TINY_CUDA_MIN_SIZE = 16
