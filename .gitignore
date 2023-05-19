@@ -1,5 +1,9 @@
 data/
+data_1/
+
 __pycache__/
 
-temp_data/
-temp_sanity_check/
+sanity_check/images
+sanity_check/videos
+
+grids/

@@ -1,17 +1,14 @@
 import gzip
 import math
 import multiprocessing
-import pickle
+import random
 import shutil
-import subprocess
 import time
-import zipfile
 import imageio
 
 from nerfacc import ContractionType, OccupancyGrid
-import psutil
 import tqdm
-from classification.utils import get_mlp_params_as_matrix, next_multiple
+from classification.utils import get_mlp_params_as_matrix
 
 import os
 import torch
@@ -25,13 +22,10 @@ from models.idecoder import ImplicitDecoder
 from nerf.loader import NeRFLoader
 
 from pathlib import Path
-from random import randint
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
-from nerf.intant_ngp import NGPradianceField
 from classification import config
-from nerf.utils import Rays, generate_occupancy_grid, render_image
-from temp_sanity_check.create_video import create_video
+from nerf.utils import Rays, render_image
 
 class NeRFDataset(Dataset):
     def __init__(self, nerfs_root: str, sample_sd: Dict[str, Any], device: str) -> None:
@@ -75,59 +69,11 @@ class NeRFDataset(Dataset):
         test_rays = test_data["rays"]
         test_pixels = test_data["pixels"]
         
+        grid_weights_path = os.path.join('grids', get_grid_file_name(data_dir))
 
-        
-        """
-        grid = generate_occupancy_grid('cuda:0', 
-                    nerf_loader.weights_file_path, 
-                    config.INSTANT_NGP_MLP_CONF, 
-                    config.AABB, 
-                    config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
-                    config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
-
-        
-        dict = {
-            'occs': grid.state_dict()['occs'].half(),
-            '_roi_aabb': grid.state_dict()['_roi_aabb'].half(),
-            '_binary': grid.state_dict()['_binary'].to_sparse(),
-            'resolution': grid.state_dict()['resolution'].half()
-        }
-        
-      
-
-        #dict = {key: tensor.to(torch.float16) for key, tensor in grid.state_dict().items()}
-
-        torch.save(dict, 'grid.pth')
-
-        #grid.load_state_dict(dict)
-
-        # Save the model in a compressed format
-        #with gzip.open('grid.pth.gz', 'wb') as f:
-        #    torch.save(dict, f)
-        with open(file_path, 'w') as file:
-            json.dump(my_dict, file)
-        exit()
-        """
-        
-        
-        """
-        with gzip.open(os.path.join(data_dir, 'grid.pth.gz'), 'rb') as f:
-            grid_weights = torch.load(f, map_location=torch.device(self.device))
-            grid_weights['_binary'] = grid_weights['_binary'].to_dense()
-        """
-        #zipped_file_path = os.path.join(data_dir, 'grid.pth.gz')
-        #with gzip.open(zipped_file_path, 'rb') as f_in, open(os.path.join('grids', f'grid_{index}.pth'), 'wb') as f_out:
-        #    shutil.copyfileobj(f_in, f_out)
-        
-        grid_weights_path = os.path.join(data_dir, 'grid.pth')
-
-        
-        #grid_weights = torch.load(grid_weights_path, map_location=torch.device(self.device))
-        #grid_weights['_binary'] = grid_weights['_binary'].to_dense()
-
-        return rays, pixels, render_bkgd, matrix, nerf_loader.weights_file_path, test_rays, test_pixels, test_render_bkgd, grid_weights_path
+        return rays, pixels, render_bkgd, matrix, data_dir, test_rays, test_pixels, test_render_bkgd, grid_weights_path
     
-    
+
     def _get_nerf_paths(self, nerfs_root: str):
         
         nerf_paths = []
@@ -146,25 +92,37 @@ class NeRFDataset(Dataset):
         
         return nerf_paths
 
-def unzip_file(file_path, extract_dir):
-    with gzip.open(file_path, 'rb') as f_in:
-        file_name = os.path.basename(file_path)
-        output_path = os.path.join(extract_dir, file_name[:-3])  # Remove the .gz extension
+
+def get_grid_file_name(file_path):
+    # Split the path into individual directories
+    directories = os.path.normpath(file_path).split(os.sep)
+    # Get the last two directories
+    last_two_dirs = directories[-2:]
+    # Join the last two directories with an underscore
+    file_name = '_'.join(last_two_dirs) + '.pth'
+    return file_name
+
+
+def unzip_file(file_path, extract_dir, file_name):
+    with gzip.open(os.path.join(file_path, 'grid.pth.gz'), 'rb') as f_in:
+        #file_name = os.path.basename(file_path)
+        # output_path = os.path.join(extract_dir, file_name[:-3])  # Remove the .gz extension
+        output_path = os.path.join(extract_dir, file_name)  # Remove the .gz extension
         with open(output_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
+
 class Nerf2vecTrainer:
     def __init__(self, device='cuda:0') -> None:
-        train_dset = NeRFDataset(os.path.abspath('data'), None, device='cpu') 
+        self.train_dset = NeRFDataset(os.path.abspath('data'), None, device='cpu') 
 
         self.device = device
         
         self.train_loader = DataLoader(
-            train_dset,
+            self.train_dset,
             batch_size=config.BATCH_SIZE,
             num_workers=8,#4,
             shuffle=True,
-            #prefetch_factor=8,
             persistent_workers=True
         )
         
@@ -229,10 +187,6 @@ class Nerf2vecTrainer:
         ).to(self.device)
         occupancy_grid.eval()
 
-        #weights = torch.load('grid.pth')
-        #weights['_binary'] = weights['_binary'].to_dense()
-        # occupancy_grid.load_state_dict(weights)
-
         render_n_samples = 1024
         scene_aabb = torch.tensor(config.AABB, dtype=torch.float32, device=self.device)
         render_step_size = (
@@ -242,78 +196,102 @@ class Nerf2vecTrainer:
         ).item()
         alpha_thre = 0.0
 
-
-
-
         for epoch in range(start_epoch, num_epochs):
-            
-            """
-            shutil.rmtree('zipped_grids')
-            path = Path('zipped_grids')
-            path.mkdir(parents=True, exist_ok=True)
-            for i in range(5000):
-                shutil.copy2('grid.pth.gz', os.path.join('zipped_grids', f'grid.pth_{i}.gz'))
-            exit()
-            """
+
+            num_samples = len(self.train_dset)
+
+            class CyclicIndexIterator:
+                def __init__(self, indices):
+                    self.indices = indices
+
+                def __iter__(self):
+                    return iter(self.indices)
+
+                def __len__(self):
+                    return len(self.indices)
+
+            # Create a list of all possible indices
+            all_indices = list(range(num_samples))
+
+            # Shuffle the indices
+            random.shuffle(all_indices)
+
+
+            # Create the cyclic index iterator
+            index_iterator = CyclicIndexIterator(all_indices)
+
+            # Create the DataLoader with the cyclic index iterator
+            data_loader = DataLoader(
+                self.train_dset,
+                batch_size=config.BATCH_SIZE,
+                sampler=index_iterator,
+                shuffle=False,
+                num_workers=8, # Important for performances! (if batch size = 16, set to 8)
+                persistent_workers=True
+            )
 
             self.epoch = epoch
             self.encoder.train()
             self.decoder.train()
 
             desc = f"Epoch {epoch}/{num_epochs}"
-            print(f'epoch {epoch} started...')
             
+            # if epoch % 100 == 0:
+            print(f'Epoch {epoch} started...')
+            epoch_start = time.time()
             
-            for batch in self.train_loader:
+            elem_per_batch = 0
+            # for batch in self.train_loader:
+            for batch_idx, batch in enumerate(data_loader):
                 
-                
+                # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
+                rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
 
-
+                elem_per_batch += len(grid_weights)
                 
-               
-                
-
-                """
-                # OPTIMIZED CODE WHEN BATCH_SIZE 16
+                # UNZIP GRIDS
                 N_CACHED_GRIDS = 512
-                if self.global_step % (N_CACHED_GRIDS/config.BATCH_SIZE)  == 0:
+                if batch_idx == 0 or batch_idx % (N_CACHED_GRIDS/config.BATCH_SIZE) == 0: 
                     print('Prepare the grids!')
                     start_unzip = time.time()
+                    
                     shutil.rmtree('grids')
                     path = Path('grids')
                     path.mkdir(parents=True, exist_ok=True)
                     
-                    folder_path = 'zipped_grids'  # Replace with the path to the folder containing the zip files
+                    # folder_path = 'zipped_grids'  # Replace with the path to the folder containing the zip files
                     extract_dir = 'grids'  # Replace with the desired extraction directory
 
                     # Get a list of GZ files in the folder
-                    gz_files = [file for file in os.listdir(folder_path) if file.endswith('.gz')][:N_CACHED_GRIDS]
+                    # gz_files = [file for file in os.listdir(folder_path) if file.endswith('.gz')][:N_CACHED_GRIDS]
+                    start_idx = int(batch_idx / (N_CACHED_GRIDS/config.BATCH_SIZE)) * N_CACHED_GRIDS
+                    print(batch_idx)
+                    end_idx = start_idx + N_CACHED_GRIDS
+                    current_split_indices = all_indices[start_idx:end_idx]
+                    
+                    # gz_files = self.train_dset.nerf_paths[current_split_indices]
+                    gz_files = [self.train_dset.nerf_paths[i] for i in current_split_indices]
+                    print(start_idx, end_idx, len(gz_files))
 
                     # Create a pool of worker processes
                     pool = multiprocessing.Pool()
 
                     # Unzip files in parallel
-                    for gz_file in gz_files:
-                        file_path = os.path.join(folder_path, gz_file)
-                        pool.apply_async(unzip_file, args=(file_path, extract_dir))
+                    for idx, gz_file in enumerate(gz_files):
+                        # file_path = os.path.join(folder_path, gz_file)
+                        file_path = gz_file
+                    
+                        file_name = get_grid_file_name(file_path)
+
+                        pool.apply_async(unzip_file, args=(file_path, extract_dir, file_name))
 
                     # Close the pool and wait for the processes to complete
                     pool.close()
                     pool.join()
 
-                end_unzip=time.time()
-                print(end_unzip-start_unzip)
-                """
-
-
-                batch_start = time.time()
-
-
-                # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
-                rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
-
-
-                # TODO: check rays, it is not created properly
+                    end_unzip=time.time()
+                    print(f'grid completed in {end_unzip-start_unzip} s')
+                
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 pixels = pixels.cuda()
                 render_bkgds = render_bkgds.cuda()
@@ -322,65 +300,9 @@ class Nerf2vecTrainer:
                 test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
                 test_pixels = test_pixels.cuda()
                 test_render_bkgds = test_render_bkgds.cuda()
-                
-                
-                """
-                grid_resolution = 128
-                contraction_type = ContractionType.AABB
-                grids = []
-                grid_start = time.time()
 
-                for idx in range(len(test_render_bkgds)):
-                    occupancy_grid = OccupancyGrid(
-                        roi_aabb=config.AABB,
-                        resolution=grid_resolution,
-                        contraction_type=contraction_type,
-                    ).to(self.device)
-                    occupancy_grid.eval()
-                    
-                    #c_dict = {}
-                    #for key in grid_weights:
-                    #    c_dict[key] = grid_weights[key][idx]
-                    #occupancy_grid.load_state_dict(c_dict)
-                        # occupancy_grid.load_state_dict(torch.load(elem))
-                    
-                    #with gzip.open('grid.pth.gz', 'rb') as f:
-                    #    loaded_dict = torch.load(f)
-                    #    occupancy_grid.load_state_dict(loaded_dict)
-                    # occupancy_grid.load_state_dict(torch.load('grid.pth'))
-
-                    # occupancy_grid.eval()
-                    grids.append(occupancy_grid)
-                """
                 
-                
-                #grid_end = time.time()
-                #print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
-                
-                
-                
-                """
-                grids = []
-                #grid_start = time.time()
-                for elem in nerf_weights_path:
-                    grid = generate_occupancy_grid(self.device, 
-                                                elem, 
-                                                config.INSTANT_NGP_MLP_CONF, 
-                                                config.AABB, 
-                                                config.OCCUPANCY_GRID_RECONSTRUCTION_ITERATIONS, 
-                                                config.OCCUPANCY_GRID_WARMUP_ITERATIONS)
-                    grids.append(grid)
-                #grid_end = time.time()
-                # print(f'[{self.global_step}] grid creation elapsed: {grid_end-grid_start}')
-                
-                # grids = [None] * config.BATCH_SIZE
-                """
-                
-                #embeddings = self.encoder(matrices)
-                #pred = self.decoder(embeddings, selected_coords)
-                # embeddings = torch.rand(config.BATCH_SIZE, config.ENCODER_EMBEDDING_DIM).cuda() # TODO: This is the output of the encoder!
                 embeddings = self.encoder(matrices)
-                
                 
                 # start_time = time.time()
                 rgb, acc, depth, n_rendering_samples = render_image(
@@ -398,8 +320,6 @@ class Nerf2vecTrainer:
                     alpha_thre=alpha_thre,
                     grid_weights=grid_weights
                 )
-                # end_time = time.time()
-                # print(f'elapsed: {end_time-start_time}')
 
                 # TODO: evaluate whether to add this condition or not
                 if 0 in n_rendering_samples:
@@ -415,34 +335,14 @@ class Nerf2vecTrainer:
                 self.grad_scaler.scale(loss).backward()
                 self.optimizer.step()
                 
-                """
-                INTERVAL = 100
-                if step % INTERVAL == 0:
-
-                    # elapsed_time = time.time() - tic
-                    loss = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
-                    print(f'loss={loss:.5f}')
-                """
-                
-                # self.logfn(f'"train/loss": {loss.item()} - elapsed: {end-start}')
-                batch_end = time.time()
-                #print(f'{self.global_step} - Single batch: {batch_end-batch_start}')
-                batch_start = time.time()
-
-                if self.global_step % 100 == 0:
+                if self.global_step % 300 == 0:
                     end = time.time()
                     print(f'{self.global_step} - "train/loss": {loss.item()} - elapsed: {end-start}')
 
                     self.encoder.eval()
                     self.decoder.eval()
                     with torch.no_grad():
-                        # for i in tqdm.tqdm(range(len(self.TEMP_nerf_loader))):
-                        #data = self.TEMP_nerf_loader[i]
-                        #render_bkgd = data["color_bkgd"]
-                        #rays = data["rays"]
-                        #pixels = data["pixels"]
                         
-                        """
                         for i in range(config.BATCH_SIZE):
                             idx_to_draw = i
                             rgb, acc, depth, n_rendering_samples = render_image(
@@ -462,43 +362,97 @@ class Nerf2vecTrainer:
                             )
 
                             imageio.imwrite(
-                                os.path.join('temp_sanity_check', f'{i}_rgb_test_{self.global_step}.png'),
+                                os.path.join('temp_sanity_check', 'images', f'{i}_rgb_test_{self.global_step}.png'),
                                 (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
                             )
                         
-                        """
+                        # ####################
+                        # EVAL
+                        # ####################
+                        psnrs = []
+                        psnrs_avg = []
+                        idx_to_draw = random.randrange(0, config.BATCH_SIZE)
+                        test_dataset_kwargs = {}
+                        test_nerf_loader = NeRFLoader(
+                            data_dir=nerf_weights_path[idx_to_draw],
+                            num_rays=config.NUM_RAYS,
+                            device=self.device,
+                            **test_dataset_kwargs)
+                        test_nerf_loader.training = False
+                        
+                        
+                        for i in tqdm.tqdm(range(len(test_nerf_loader))):
+                            data = test_nerf_loader[i]
+                            render_bkgd = data["color_bkgd"]
+                            test_rays_2 = data["rays"]
+                            
+                            pixels = data["pixels"].unsqueeze(dim=0)
+                            
+                            
+                            rgb, acc, depth, n_rendering_samples = render_image(
+                                self.decoder,
+                                embeddings[idx_to_draw].unsqueeze(dim=0),
+                                occupancy_grid,#[grids[idx_to_draw]],
+                                Rays(origins=test_rays_2.origins.unsqueeze(dim=0), viewdirs=test_rays_2.viewdirs.unsqueeze(dim=0)),
+                                scene_aabb,
+                                # rendering options
+                                near_plane=None,
+                                far_plane=None,
+                                render_step_size=render_step_size,
+                                render_bkgd=test_render_bkgds,
+                                cone_angle=0.0,
+                                alpha_thre=alpha_thre,
+                                grid_weights=[grid_weights[idx_to_draw]]
+                            )
+
+                            if i == 0:
+                                imageio.imwrite(
+                                    os.path.join('temp_sanity_check', 'images', f'{i}_rgb_test_{self.global_step}.png'),
+                                    (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
+                                )
+
+                            mse = F.mse_loss(rgb, pixels)
+                            psnr = -10.0 * torch.log(mse) / np.log(10.0)
+                            psnrs.append(psnr.item())
+                        
+                        psnr_avg = sum(psnrs) / len(psnrs)
+                        print(f'PSNR: {psnr_avg}')
+                        psnrs_avg.append(psnr_avg)
+
                         
                         
                         """
-                        if self.global_step == 2900:
+                        if self.global_step == 9900:
                             create_video(
                                     448, 
                                     448, 
                                     self.device, 
                                     245.0, 
                                     self.decoder, 
-                                    grids, 
+                                    occupancy_grid, 
                                     scene_aabb,
                                     None, 
                                     None, 
                                     render_step_size,
-                                    render_bkgd=test_render_bkgds,
+                                    render_bkgd=test_render_bkgds[0],
                                     cone_angle=0.0,
                                     alpha_thre=alpha_thre,
                                     # test options
                                     path=os.path.join('temp_sanity_check', f'video_{self.global_step}.mp4'),
-                                    embeddings=embeddings
+                                    embeddings=embeddings[idx_to_draw].unsqueeze(dim=0),
+                                    grid_weights=[grid_weights[idx_to_draw]]
                                 )
                         """
                         
                         
+                    print(psnrs_avg)
+                    
                     start = time.time()
                     self.encoder.train()
                     self.decoder.train()
                     
                 
                 self.global_step += 1
-                print(f'{self.global_step}')    
 
-
-
+            epoch_end = time.time()
+            print(f'Epoch {epoch} completed in {epoch_end-epoch_start}s. Processed {elem_per_batch} elements')        

@@ -1,22 +1,27 @@
+import os
 import shutil
 
 import torch
 from classification.train_nerf2vec import Nerf2vecTrainer
+from dataset.generate_grids import start_grids_generation
 
 def train_nerf2vec():
     nerf2vec = Nerf2vecTrainer()
     nerf2vec.train()
 
+def generate_grids():
+
+    nerf_roots = [os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerfacc_nerf2vec', 'data_TRAINED'),
+                  os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerfacc_nerf2vec', 'data_TRAINED_A1'),
+                  os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerfacc_nerf2vec', 'data')]
+
+    for nerf_root in nerf_roots:
+        start_grids_generation(nerf_root)
+
+
 if __name__ == '__main__':
 
-    """
-    source_file = 'grid.pth.gz'
-    destination_directory = 'zipped_grids'
-    num_duplicates = 1024
-
-    for i in range(num_duplicates):
-        destination_file = f'{destination_directory}/grid_{i+1}.pth.gz'
-        shutil.copyfile(source_file, destination_file)
-    """
     # torch.cuda.empty_cache()
-    train_nerf2vec()
+    # train_nerf2vec()
+
+    generate_grids()
