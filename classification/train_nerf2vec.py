@@ -22,7 +22,7 @@ from models.idecoder import ImplicitDecoder
 from nerf.loader import NeRFLoader
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from classification import config
 from nerf.utils import Rays, render_image
@@ -46,7 +46,7 @@ def unzip_file(file_path, extract_dir, file_name):
 
 
 class NeRFDataset(Dataset):
-    def __init__(self, nerfs_root: str, sample_sd: Dict[str, Any], device: str) -> None:
+    def __init__(self, nerfs_root: str, device: str) -> None:
         super().__init__()
 
         self.nerf_paths = self._get_nerf_paths(nerfs_root)
@@ -79,17 +79,16 @@ class NeRFDataset(Dataset):
         matrix = torch.load(nerf_loader.weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
         
-
-        nerf_loader.training = False
+        #nerf_loader.training = False
         # Get data for the batch
-        test_data = nerf_loader[0]
-        test_render_bkgd = test_data["color_bkgd"]
-        test_rays = test_data["rays"]
-        test_pixels = test_data["pixels"]
+        #test_data = nerf_loader[0]
+        #test_render_bkgd = test_data["color_bkgd"]
+        #test_rays = test_data["rays"]
+        #test_pixels = test_data["pixels"]
         
         grid_weights_path = os.path.join('grids', get_grid_file_name(data_dir))
 
-        return rays, pixels, render_bkgd, matrix, data_dir, test_rays, test_pixels, test_render_bkgd, grid_weights_path
+        return rays, pixels, render_bkgd, matrix, grid_weights_path
     
 
     def _get_nerf_paths(self, nerfs_root: str):
@@ -124,10 +123,12 @@ class CyclicIndexIterator:
     
 class Nerf2vecTrainer:
     def __init__(self, device='cuda:0') -> None:
-        self.train_dset = NeRFDataset(os.path.abspath('data'), None, device='cpu') 
 
         self.device = device
-        
+
+        self.train_dset = NeRFDataset(os.path.abspath('data'), device='cpu') 
+        self.val_dset = NeRFDataset(os.path.abspath('data'), device='cpu')   # TODO: TO UPDATE WITH THE VALIDATION SET!
+
         encoder = Encoder(
             config.MLP_UNITS,
             config.ENCODER_HIDDEN_DIM,
@@ -167,133 +168,117 @@ class Nerf2vecTrainer:
         params = list(self.encoder.parameters())
         params.extend(self.decoder.parameters())
         self.optimizer = AdamW(params, lr, weight_decay=wd)
+        self.grad_scaler = torch.cuda.amp.GradScaler(2**10)
         
         self.epoch = 0
         self.global_step = 0
-        # TODO....
-        """
-        self.best_chamfer = float("inf")
+        self.best_psnr = float("inf")
 
-        self.ckpts_path = get_out_dir() / "ckpts"
-        self.all_ckpts_path = get_out_dir() / "all_ckpts"
+        self.ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
+        self.all_ckpts_path = Path(os.path.join('classification', 'train', 'all_ckpts'))
 
         if self.ckpts_path.exists():
             self.restore_from_last_ckpt()
 
         self.ckpts_path.mkdir(exist_ok=True)
         self.all_ckpts_path.mkdir(exist_ok=True)
-        """
-        self.grad_scaler = torch.cuda.amp.GradScaler(2**10)
+        
 
     def logfn(self, values: Dict[str, Any]) -> None:
         #wandb.log(values, step=self.global_step, commit=False)
         print(values)
     
+    def unzip_occupancy_grids(self, batch_idx: int, all_indices: List[int], nerf_paths: List[str], unzip_folder='grids'):
+        N_CACHED_GRIDS = 512
+        if batch_idx == 0 or batch_idx % (N_CACHED_GRIDS/config.BATCH_SIZE) == 0: 
+            self.logfn('Prepare the grids!')
+            start_unzip = time.time()
+            
+            shutil.rmtree(unzip_folder)
+            path = Path(unzip_folder)
+            path.mkdir(parents=True, exist_ok=True)
+            
+            # Retrieve the list of gz files to unzip
+            start_idx = int(batch_idx / (N_CACHED_GRIDS/config.BATCH_SIZE)) * N_CACHED_GRIDS
+            end_idx = start_idx + N_CACHED_GRIDS
+            current_split_indices = all_indices[start_idx:end_idx]
+
+            gz_files = [nerf_paths[i] for i in current_split_indices]
+
+            # Unzip files in parallel
+            pool = multiprocessing.Pool()
+
+            for file_path in gz_files:
+                file_name = get_grid_file_name(file_path)
+                pool.apply_async(unzip_file, args=(file_path, unzip_folder, file_name))
+
+            # Close the pool and wait for the processes to complete
+            pool.close()
+            pool.join()
+
+            end_unzip=time.time()
+            self.logfn(f'Grids unzip completed in {end_unzip-start_unzip}s')
+    
+    def create_data_loader(self, dataset, shuffle=True) -> DataLoader:
+        num_samples = len(dataset)
+
+        # Create a list of all possible indices
+        all_indices = list(range(num_samples))
+
+        if shuffle:
+            random.shuffle(all_indices)
+
+        # Create the cyclic index iterator
+        index_iterator = CyclicIndexIterator(all_indices)
+
+        # Create the DataLoader with the cyclic index iterator
+        loader = DataLoader(
+            self.train_dset,
+            batch_size=config.BATCH_SIZE,
+            sampler=index_iterator,
+            shuffle=False,
+            num_workers=8, # Important for performances! (if batch size = 16, set to 8)
+            persistent_workers=True
+        )
+
+        return loader, all_indices
+
     def train(self):
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
 
-        start = time.time()
-
         for epoch in range(start_epoch, num_epochs):
 
-            num_samples = len(self.train_dset)
-
-            # Create a list of all possible indices
-            all_indices = list(range(num_samples))
-
-            # Shuffle the indices
-            random.shuffle(all_indices)
-
-
-            # Create the cyclic index iterator
-            index_iterator = CyclicIndexIterator(all_indices)
-
-            # Create the DataLoader with the cyclic index iterator
-            data_loader = DataLoader(
-                self.train_dset,
-                batch_size=config.BATCH_SIZE,
-                sampler=index_iterator,
-                shuffle=False,
-                num_workers=8, # Important for performances! (if batch size = 16, set to 8)
-                persistent_workers=True
-            )
+            train_loader, train_indices = self.create_data_loader(self.train_dset, shuffle=True)
 
             self.epoch = epoch
             self.encoder.train()
             self.decoder.train()
-
-            desc = f"Epoch {epoch}/{num_epochs}"
             
-            # if epoch % 100 == 0:
-            print(f'Epoch {epoch} started...')
+            self.logfn(f'Epoch {epoch} started...')         
             epoch_start = time.time()
             
+            # TODO: remove this variable. For the moment used for debugging. 
             elem_per_batch = 0
-            # for batch in self.train_loader:
-            for batch_idx, batch in enumerate(data_loader):
+
+            for batch_idx, batch in enumerate(train_loader):
                 
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
-                rays, pixels, render_bkgds, matrices, nerf_weights_path, test_rays, test_pixels, test_render_bkgds, grid_weights = batch
+                rays, pixels, render_bkgds, matrices, grid_weights_path = batch
 
-                elem_per_batch += len(grid_weights)
+                elem_per_batch += len(grid_weights_path)
                 
-                # UNZIP GRIDS
-                N_CACHED_GRIDS = 512
-                if batch_idx == 0 or batch_idx % (N_CACHED_GRIDS/config.BATCH_SIZE) == 0: 
-                    print('Prepare the grids!')
-                    start_unzip = time.time()
-                    
-                    shutil.rmtree('grids')
-                    path = Path('grids')
-                    path.mkdir(parents=True, exist_ok=True)
-                    
-                    # folder_path = 'zipped_grids'  # Replace with the path to the folder containing the zip files
-                    extract_dir = 'grids'  # Replace with the desired extraction directory
-
-                    # Get a list of GZ files in the folder
-                    # gz_files = [file for file in os.listdir(folder_path) if file.endswith('.gz')][:N_CACHED_GRIDS]
-                    start_idx = int(batch_idx / (N_CACHED_GRIDS/config.BATCH_SIZE)) * N_CACHED_GRIDS
-                    print(batch_idx)
-                    end_idx = start_idx + N_CACHED_GRIDS
-                    current_split_indices = all_indices[start_idx:end_idx]
-                    
-                    # gz_files = self.train_dset.nerf_paths[current_split_indices]
-                    gz_files = [self.train_dset.nerf_paths[i] for i in current_split_indices]
-                    print(start_idx, end_idx, len(gz_files))
-
-                    # Create a pool of worker processes
-                    pool = multiprocessing.Pool()
-
-                    # Unzip files in parallel
-                    for idx, gz_file in enumerate(gz_files):
-                        # file_path = os.path.join(folder_path, gz_file)
-                        file_path = gz_file
-                    
-                        file_name = get_grid_file_name(file_path)
-
-                        pool.apply_async(unzip_file, args=(file_path, extract_dir, file_name))
-
-                    # Close the pool and wait for the processes to complete
-                    pool.close()
-                    pool.join()
-
-                    end_unzip=time.time()
-                    print(f'grid completed in {end_unzip-start_unzip} s')
+                self.unzip_occupancy_grids(batch_idx=batch_idx, 
+                                           all_indices=train_indices, 
+                                           nerf_paths=self.train_dset.nerf_paths)
                 
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 pixels = pixels.cuda()
                 render_bkgds = render_bkgds.cuda()
                 matrices = matrices.cuda()
-
-                test_rays = test_rays._replace(origins=test_rays.origins.cuda(), viewdirs=test_rays.viewdirs.cuda())
-                test_pixels = test_pixels.cuda()
-                test_render_bkgds = test_render_bkgds.cuda()
-
                 
                 embeddings = self.encoder(matrices)
                 
-                # start_time = time.time()
                 rgb, acc, depth, n_rendering_samples = render_image(
                     self.decoder,
                     embeddings,
@@ -307,7 +292,7 @@ class Nerf2vecTrainer:
                     render_bkgd=render_bkgds,
                     cone_angle=0.0,
                     alpha_thre=0.0,
-                    grid_weights=grid_weights
+                    grid_weights=grid_weights_path
                 )
 
                 # TODO: evaluate whether to add this condition or not
@@ -324,6 +309,7 @@ class Nerf2vecTrainer:
                 self.grad_scaler.scale(loss).backward()
                 self.optimizer.step()
                 
+                """
                 if self.global_step % 300 == 0:
                     end = time.time()
                     print(f'{self.global_step} - "train/loss": {loss.item()} - elapsed: {end-start}')
@@ -347,7 +333,7 @@ class Nerf2vecTrainer:
                                 render_bkgd=test_render_bkgds,
                                 cone_angle=0.0,
                                 alpha_thre=0.0,
-                                grid_weights=[grid_weights[i]]
+                                grid_weights=[grid_weights_path[i]]
                             )
 
                             imageio.imwrite(
@@ -391,7 +377,7 @@ class Nerf2vecTrainer:
                                 render_bkgd=test_render_bkgds,
                                 cone_angle=0.0,
                                 alpha_thre=0.0,
-                                grid_weights=[grid_weights[idx_to_draw]]
+                                grid_weights=[grid_weights_path[idx_to_draw]]
                             )
 
                             if i == 0:
@@ -410,7 +396,7 @@ class Nerf2vecTrainer:
 
                         
                         
-                        """
+                        '''
                         if self.global_step == 9900:
                             create_video(
                                     448, 
@@ -429,19 +415,137 @@ class Nerf2vecTrainer:
                                     # test options
                                     path=os.path.join('temp_sanity_check', f'video_{self.global_step}.mp4'),
                                     embeddings=embeddings[idx_to_draw].unsqueeze(dim=0),
-                                    grid_weights=[grid_weights[idx_to_draw]]
+                                    grid_weights=[grid_weights_path[idx_to_draw]]
                                 )
-                        """
+                        '''
                         
                         
                     print(psnrs_avg)
                     
-                    start = time.time()
                     self.encoder.train()
                     self.decoder.train()
+                """
                     
-                
                 self.global_step += 1
+                # print(self.global_step)
 
+            """
+            if epoch % 10 == 0 or epoch == num_epochs - 1:
+
+                # TODO: The non-shuffled version could be created only once
+                # validation_loader, validation_indices = self.create_data_loader(self.val_dset, shuffle=False)
+                # validation_loader_shuffled, validation_indices_shuffled = self.create_data_loader(self.val_dset, shuffle=False)
+
+                self.val(train_loader, indices=train_indices, nerf_paths=self.train_dset.nerf_paths)
+                # self.val("val")
+                # self.plot("train")
+                # self.plot("val")
+            
+            if epoch % 50 == 0:
+                self.save_ckpt(all=True)
+            
+            self.save_ckpt()
+            """
+            
             epoch_end = time.time()
             print(f'Epoch {epoch} completed in {epoch_end-epoch_start}s. Processed {elem_per_batch} elements')        
+    
+    @torch.no_grad()
+    def val(self, loader: DataLoader, all_indices: List[int], nerf_paths: List[str], split: str) -> None:
+        
+        
+
+        self.encoder.eval()
+        self.decoder.eval()
+
+        psnrs = []
+    
+        for batch_idx, batch in enumerate(loader):
+            rays, pixels, render_bkgds, matrices, grid_weights_path = batch
+                
+            self.unzip_occupancy_grids(batch_idx=batch_idx, all_indices=all_indices, nerf_paths=nerf_paths)
+            
+            rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
+            pixels = pixels.cuda()
+            render_bkgds = render_bkgds.cuda()
+            matrices = matrices.cuda()
+            
+            embeddings = self.encoder(matrices)
+            
+            rgb, acc, depth, n_rendering_samples = render_image(
+                self.decoder,
+                embeddings,
+                self.occupancy_grid,
+                rays,
+                self.scene_aabb,
+                # rendering options
+                near_plane=None,
+                far_plane=None,
+                render_step_size=self.render_step_size,
+                render_bkgd=render_bkgds,
+                cone_angle=0.0,
+                alpha_thre=0.0,
+                grid_weights=grid_weights_path
+            )
+
+            # TODO: evaluate whether to add this condition or not
+            if 0 in n_rendering_samples:
+                print(f'0 n_rendering_samples. Skip iteration.')
+                continue
+
+            mse = F.mse_loss(rgb, pixels)
+            psnr = -10.0 * torch.log(mse) / np.log(10.0)
+            psnrs.append(psnr.item())
+
+
+        mean_psnr = sum(psnrs) / len(psnrs)
+
+        self.logfn({f"{split}/PSNR": mean_psnr})
+        
+        if split == "val" and mean_psnr > self.best_psnr:
+            self.best_psnr = mean_psnr
+            self.save_ckpt(best=True)
+
+    def save_ckpt(self, best: bool = False, all: bool = False) -> None:
+        ckpt = {
+            "epoch": self.epoch,
+            "encoder": self.encoder.state_dict(),
+            "decoder": self.decoder.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "best_chamfer": self.best_chamfer,
+        }
+
+        if all:
+            ckpt_path = self.all_ckpts_path / f"{self.epoch}.pt"
+            torch.save(ckpt, ckpt_path)
+
+        else:
+            for previous_ckpt_path in self.ckpts_path.glob("*.pt"):
+                if "best" not in previous_ckpt_path.name:
+                    previous_ckpt_path.unlink()
+
+            ckpt_path = self.ckpts_path / f"{self.epoch}.pt"
+            torch.save(ckpt, ckpt_path)
+
+        if best:
+            ckpt_path = self.ckpts_path / "best.pt"
+            torch.save(ckpt, ckpt_path)
+    
+    def restore_from_last_ckpt(self) -> None:
+        return
+        # TODO: FIX...
+        if self.ckpts_path.exists():
+            ckpt_paths = [p for p in self.ckpts_path.glob("*.pt") if "best" not in p.name]
+            error_msg = "Expected only one ckpt apart from best, found none or too many."
+            assert len(ckpt_paths) == 1, error_msg
+
+            ckpt_path = ckpt_paths[0]
+            ckpt = torch.load(ckpt_path)
+
+            self.epoch = ckpt["epoch"] + 1
+            self.global_step = self.epoch * len(self.train_loader)
+            self.best_chamfer = ckpt["best_chamfer"]
+
+            self.encoder.load_state_dict(ckpt["encoder"])
+            self.decoder.load_state_dict(ckpt["decoder"])
+            self.optimizer.load_state_dict(ckpt["optimizer"])

@@ -22,6 +22,6 @@ def generate_grids():
 if __name__ == '__main__':
 
     # torch.cuda.empty_cache()
-    # train_nerf2vec()
+    train_nerf2vec()
 
-    generate_grids()
+    # generate_grids()
