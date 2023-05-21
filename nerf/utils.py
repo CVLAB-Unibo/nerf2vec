@@ -192,7 +192,7 @@ def render_image(
     colors = torch.stack(colors, dim=0).view((*rays_shape[:-1], -1))
     opacities = torch.stack(opacities, dim=0).view((*rays_shape[:-1], -1))
     depths = torch.stack(depths, dim=0).view((*rays_shape[:-1], -1))
-    n_rendering_samples = [elem[0] for elem in n_rendering_samples]
+    n_rendering_samples = [sum(tensor) for tensor in n_rendering_samples] 
     
     return (
         colors, opacities, depths, n_rendering_samples
