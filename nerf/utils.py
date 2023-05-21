@@ -171,7 +171,7 @@ def render_image(
                 rgb_sigma_fn=rgb_sigma_fn,
                 render_bkgd=render_bkgd[curr_batch_idx],
             )
-            chunk_results = [rgb, opacity, depth, len(b_t_starts[curr_batch_idx])]
+            chunk_results = [rgb, opacity, depth, len(b_t_starts[curr_batch_idx][curr_mask]) if curr_mask is not None else len(b_t_starts[curr_batch_idx])]
             
             # Append to results array
             if curr_batch_idx < len(results):

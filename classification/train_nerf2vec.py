@@ -208,9 +208,11 @@ class Nerf2vecTrainer:
         self.plots_path.mkdir(parents=True, exist_ok=True)
         
 
-    def logfn(self, values: Dict[str, Any]) -> None:
+    def logfn(self, values: str) -> None:
         #wandb.log(values, step=self.global_step, commit=False)
         print(values)
+        with open('train_logs.txt', 'a') as f:
+            f.write(f'{values}\n')
     
     def unzip_occupancy_grids(self, batch_idx: int, all_indices: List[int], nerf_paths: List[str], unzip_folder='grids'):
         N_CACHED_GRIDS = 512
@@ -573,13 +575,11 @@ class Nerf2vecTrainer:
 
             _, test_nerf, matrices, grid_weights_path = batch
             rays = test_nerf['rays']
-            pixels = test_nerf['pixels']
             color_bkgds = test_nerf['color_bkgd']
                 
             self.unzip_occupancy_grids(batch_idx=batch_idx, all_indices=all_indices, nerf_paths=nerf_paths)
             
             rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
-            pixels = pixels.cuda()
             color_bkgds = color_bkgds.cuda()
             matrices = matrices.cuda()
             
@@ -605,19 +605,14 @@ class Nerf2vecTrainer:
 
 
                 img_name = get_nerf_name_from_grid(grid_weights_path[idx])
-
-                # TODO: evaluate whether to add this condition or not
-                if 0 in n_rendering_samples:
-                    self.logfn(f'Unable to create image: {img_name}')
-                    continue
                 
                 imageio.imwrite(
                     os.path.join(self.plots_path, f'{img_name}_{self.global_step}.png'),
                     (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8)
                 )
 
-                #break
-            #break
+                break
+            break
 
 
     def save_ckpt(self, best: bool = False, all: bool = False) -> None:
