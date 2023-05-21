@@ -10,7 +10,10 @@ def cycle_path(nerfs_root):
 
     dict_result = {}
 
-    base_folder = os.path.join('.', os.path.basename(os.path.normpath(nerfs_root)))
+    # base_folder = os.path.join('.', os.path.basename(os.path.normpath(nerfs_root)))
+    # last_two_parts = os.path.join(*os.path.split(nerfs_root)[-2:])
+    last_two_parts = os.path.join(*os.path.splitdrive(nerfs_root)[1].split(os.sep)[-2:])
+    base_folder = os.path.join('.', last_two_parts)
 
     for class_name in os.listdir(nerfs_root):
 
@@ -33,6 +36,7 @@ def cycle_path(nerfs_root):
 def create():
     # root_paths = ['data', 'augmented1', 'augmented2']
     root_paths = ['/media/data4TB/sirocchi/nerf2vec/data', '/media/data4TB/sirocchi/nerf2vec/data_1']
+    root_paths = ['C:\\Users\\dsiro\\Documents\\Projects\\nerf2vec\\data\\data_TRAINED']
 
     train = []
     validation = []

@@ -1,4 +1,5 @@
 import gzip
+import json
 import math
 import multiprocessing
 import random
@@ -46,10 +47,14 @@ def unzip_file(file_path, extract_dir, file_name):
 
 
 class NeRFDataset(Dataset):
-    def __init__(self, nerfs_root: str, device: str) -> None:
+    def __init__(self, split_json: str, device: str) -> None:
         super().__init__()
 
-        self.nerf_paths = self._get_nerf_paths(nerfs_root)
+        with open(split_json) as file:
+            self.nerf_paths = json.load(file)
+        
+        # self.nerf_paths = self._get_nerf_paths('data\\data_TRAINED')
+        assert isinstance(self.nerf_paths, list), 'The json file provided is not a list.'
 
         self.device = device
 
@@ -79,18 +84,11 @@ class NeRFDataset(Dataset):
         matrix = torch.load(nerf_loader.weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
         
-        #nerf_loader.training = False
-        # Get data for the batch
-        #test_data = nerf_loader[0]
-        #test_render_bkgd = test_data["color_bkgd"]
-        #test_rays = test_data["rays"]
-        #test_pixels = test_data["pixels"]
-        
         grid_weights_path = os.path.join('grids', get_grid_file_name(data_dir))
 
         return rays, pixels, render_bkgd, matrix, grid_weights_path
     
-
+    """
     def _get_nerf_paths(self, nerfs_root: str):
         
         nerf_paths = []
@@ -108,8 +106,9 @@ class NeRFDataset(Dataset):
                 nerf_paths.append(subject_dir)
         
         return nerf_paths
-
-
+    """
+    
+    
 class CyclicIndexIterator:
     def __init__(self, indices):
         self.indices = indices
@@ -126,8 +125,10 @@ class Nerf2vecTrainer:
 
         self.device = device
 
-        self.train_dset = NeRFDataset(os.path.abspath('data'), device='cpu') 
-        self.val_dset = NeRFDataset(os.path.abspath('data'), device='cpu')   # TODO: TO UPDATE WITH THE VALIDATION SET!
+        train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
+        self.train_dset = NeRFDataset(train_dset_json, device='cpu') 
+
+        self.val_dset = NeRFDataset(train_dset_json, device='cpu')   # TODO: TO UPDATE WITH THE VALIDATION SET!
 
         encoder = Encoder(
             config.MLP_UNITS,
@@ -180,8 +181,8 @@ class Nerf2vecTrainer:
         if self.ckpts_path.exists():
             self.restore_from_last_ckpt()
 
-        self.ckpts_path.mkdir(exist_ok=True)
-        self.all_ckpts_path.mkdir(exist_ok=True)
+        self.ckpts_path.mkdir(parents=True, exist_ok=True)
+        self.all_ckpts_path.mkdir(parents=True, exist_ok=True)
         
 
     def logfn(self, values: Dict[str, Any]) -> None:
@@ -534,8 +535,6 @@ class Nerf2vecTrainer:
             torch.save(ckpt, ckpt_path)
     
     def restore_from_last_ckpt(self) -> None:
-        return
-        # TODO: FIX...
         if self.ckpts_path.exists():
             ckpt_paths = [p for p in self.ckpts_path.glob("*.pt") if "best" not in p.name]
             error_msg = "Expected only one ckpt apart from best, found none or too many."
@@ -545,7 +544,7 @@ class Nerf2vecTrainer:
             ckpt = torch.load(ckpt_path)
 
             self.epoch = ckpt["epoch"] + 1
-            self.global_step = self.epoch * len(self.train_loader)
+            self.global_step = self.epoch * math.ceil(len(self.train_dset)/config.BATCH_SIZE)  # len(self.train_loader)
             self.best_psnr = ckpt["best_psnr"]
 
             self.encoder.load_state_dict(ckpt["encoder"])
