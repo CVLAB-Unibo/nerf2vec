@@ -1,5 +1,6 @@
 data/
 data_1/
+temp_data/
 
 __pycache__/
 
