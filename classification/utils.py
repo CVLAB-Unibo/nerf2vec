@@ -1,5 +1,8 @@
 from collections import OrderedDict
-import collections
+import datetime
+import gzip
+import os
+import shutil
 from typing import Any, Dict
 from torch import Tensor
 import torch
@@ -49,6 +52,7 @@ def get_mlp_params_as_matrix(flattened_params: Tensor, sd: Dict[str, Any] = None
     params = flattened_params[start:-end]
     return params.reshape((-1, feat_dim))
 
+
 def get_mlp_sample_sd():
     sample_sd = OrderedDict()
     sample_sd['input'] = torch.zeros(config.MLP_UNITS, next_multiple(config.MLP_INPUT_SIZE_AFTER_ENCODING, config.TINY_CUDA_MIN_SIZE))
@@ -57,3 +61,34 @@ def get_mlp_sample_sd():
     sample_sd['output'] = torch.zeros(next_multiple(config.MLP_OUTPUT_SIZE, config.TINY_CUDA_MIN_SIZE), config.MLP_UNITS)
 
     return sample_sd
+
+
+def get_grid_file_name(file_path):
+    # Split the path into individual directories
+    directories = os.path.normpath(file_path).split(os.sep)
+    # Get the last two directories
+    last_two_dirs = directories[-2:]
+    # Join the last two directories with an underscore
+    file_name = '_'.join(last_two_dirs) + '.pth'
+    return file_name
+
+
+def get_class_label(file_path):
+    directories = os.path.normpath(file_path).split(os.sep)
+    class_label = directories[-2]
+    
+    return class_label
+
+
+def get_nerf_name_from_grid(file_path):
+    grid_name = os.path.basename(file_path)
+    nerf_name = os.path.splitext(grid_name)[0]
+    return nerf_name
+
+
+def unzip_file(file_path, extract_dir, file_name):
+    with gzip.open(os.path.join(file_path, 'grid.pth.gz'), 'rb') as f_in:
+        output_path = os.path.join(extract_dir, file_name) 
+        with open(output_path, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    

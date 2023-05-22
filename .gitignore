@@ -10,3 +10,5 @@ grids/
 
 classification/train
 classification/plots
+
+wandb/
