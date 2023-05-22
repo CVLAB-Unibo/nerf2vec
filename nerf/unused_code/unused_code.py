@@ -197,3 +197,147 @@ for batch_idx in range(batch_size):
 
 b_positions = torch.stack(b_positions, dim=0)
 """   
+
+
+# ################################################################################
+# CREATE VIDEO DURING TRAINING
+# ################################################################################
+"""
+if self.global_step % 300 == 0:
+    end = time.time()
+    print(f'{self.global_step} - "train/loss": {loss.item()} - elapsed: {end-start}')
+
+    self.encoder.eval()
+    self.decoder.eval()
+    with torch.no_grad():
+        
+        for i in range(config.BATCH_SIZE):
+            idx_to_draw = i
+            rgb, acc, depth, n_rendering_samples = render_image(
+                self.decoder,
+                embeddings[idx_to_draw].unsqueeze(dim=0),
+                self.occupancy_grid,#[grids[idx_to_draw]],
+                Rays(origins=test_rays.origins[idx_to_draw].unsqueeze(dim=0), viewdirs=test_rays.viewdirs[idx_to_draw].unsqueeze(dim=0)),
+                self.scene_aabb,
+                # rendering options
+                near_plane=None,
+                far_plane=None,
+                render_step_size=self.render_step_size,
+                render_bkgd=test_render_bkgds,
+                cone_angle=0.0,
+                alpha_thre=0.0,
+                grid_weights=[grid_weights_path[i]]
+            )
+
+            imageio.imwrite(
+                os.path.join('temp_sanity_check', 'images', f'{i}_rgb_test_{self.global_step}.png'),
+                (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
+            )
+        
+        # ####################
+        # EVAL
+        # ####################
+        psnrs = []
+        psnrs_avg = []
+        idx_to_draw = random.randrange(0, config.BATCH_SIZE)
+        test_dataset_kwargs = {}
+        test_nerf_loader = NeRFLoader(
+            data_dir=nerf_weights_path[idx_to_draw],
+            num_rays=config.NUM_RAYS,
+            device=self.device,
+            **test_dataset_kwargs)
+        test_nerf_loader.training = False
+        
+        
+        for i in tqdm.tqdm(range(len(test_nerf_loader))):
+            data = test_nerf_loader[i]
+            render_bkgd = data["color_bkgd"]
+            test_rays_2 = data["rays"]
+            
+            pixels = data["pixels"].unsqueeze(dim=0)
+            
+            
+            rgb, acc, depth, n_rendering_samples = render_image(
+                self.decoder,
+                embeddings[idx_to_draw].unsqueeze(dim=0),
+                self.occupancy_grid,
+                Rays(origins=test_rays_2.origins.unsqueeze(dim=0), viewdirs=test_rays_2.viewdirs.unsqueeze(dim=0)),
+                self.scene_aabb,
+                # rendering options
+                near_plane=None,
+                far_plane=None,
+                render_step_size=self.render_step_size,
+                render_bkgd=test_render_bkgds,
+                cone_angle=0.0,
+                alpha_thre=0.0,
+                grid_weights=[grid_weights_path[idx_to_draw]]
+            )
+
+            if i == 0:
+                imageio.imwrite(
+                    os.path.join('temp_sanity_check', 'images', f'{i}_rgb_test_{self.global_step}.png'),
+                    (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8),
+                )
+
+            mse = F.mse_loss(rgb, pixels)
+            psnr = -10.0 * torch.log(mse) / np.log(10.0)
+            psnrs.append(psnr.item())
+        
+        psnr_avg = sum(psnrs) / len(psnrs)
+        print(f'PSNR: {psnr_avg}')
+        psnrs_avg.append(psnr_avg)
+
+        
+        
+        '''
+        if self.global_step == 9900:
+            create_video(
+                    448, 
+                    448, 
+                    self.device, 
+                    245.0, 
+                    self.decoder, 
+                    occupancy_grid, 
+                    scene_aabb,
+                    None, 
+                    None, 
+                    render_step_size,
+                    render_bkgd=test_render_bkgds[0],
+                    cone_angle=0.0,
+                    alpha_thre=alpha_thre,
+                    # test options
+                    path=os.path.join('temp_sanity_check', f'video_{self.global_step}.mp4'),
+                    embeddings=embeddings[idx_to_draw].unsqueeze(dim=0),
+                    grid_weights=[grid_weights_path[idx_to_draw]]
+                )
+        '''
+        
+        
+    print(psnrs_avg)
+    
+    self.encoder.train()
+    self.decoder.train()
+"""
+
+# ################################################################################
+# RETRIEVE NERF LIST FROM FILE SYSTEM
+# ################################################################################
+"""
+def _get_nerf_paths(self, nerfs_root: str):
+    
+    nerf_paths = []
+
+    for class_name in os.listdir(nerfs_root):
+
+        subject_dirs = os.path.join(nerfs_root, class_name)
+
+        # Sometimes there are hidden files (e.g., when unzipping a file from a Mac)
+        if not os.path.isdir(subject_dirs):
+            continue
+        
+        for subject_name in os.listdir(subject_dirs):
+            subject_dir = os.path.join(subject_dirs, subject_name)
+            nerf_paths.append(subject_dir)
+    
+    return nerf_paths
+"""
