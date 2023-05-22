@@ -191,7 +191,7 @@ class Nerf2vecTrainer:
     def logfn(self, values: str) -> None:
         #wandb.log(values, step=self.global_step, commit=False)
         print(values)
-        with open('train_logs.txt', 'a') as f:
+        with open(os.path.join('classification','train','train_logs.txt'), 'a') as f:
             f.write(f'{values}\n')
     
     def unzip_occupancy_grids(self, batch_idx: int, nerf_indices: List[int], nerf_paths: List[str], unzip_folder='grids'):

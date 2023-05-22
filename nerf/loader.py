@@ -2,11 +2,8 @@
 TODO: before delivery decide whether to remove the Dataset class from  NeRFLoader. 
 This because, at the moment, it's not useful. However, this reflects the NerfAcc implementation of this class.
 """
-import collections
 import json
-import operator
 import os
-from PIL import Image
 
 import imageio.v2 as imageio
 import numpy as np
@@ -17,18 +14,6 @@ from nerf.utils import Rays
 
 
 def _load_renderings(data_dir: str, split: str):
-    """
-    if not root_fp.startswith("/"):
-        root_fp = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..",
-            "..",
-            root_fp,
-        )
-    """
-
-    # data_dir = os.path.join(root_fp, subject_id)
-    # print(f'Loading renderings from: {data_dir}')
     
     with open(
         os.path.join(data_dir, "transforms_{}.json".format(split)), "r"
@@ -55,6 +40,7 @@ def _load_renderings(data_dir: str, split: str):
 
     return images, camtoworlds, focal
 
+
 class NeRFLoader(torch.utils.data.Dataset):
 
     WIDTH, HEIGHT = 224, 224  
@@ -65,7 +51,7 @@ class NeRFLoader(torch.utils.data.Dataset):
         self,
         data_dir: str,
         split: str = "train",
-        color_bkgd_aug: str = "random",  # NERF2VEC (Originally, it was white)
+        color_bkgd_aug: str = "random",  
         num_rays: int = None,
         near: float = None,
         far: float = None,
@@ -79,17 +65,11 @@ class NeRFLoader(torch.utils.data.Dataset):
         self.near = self.NEAR if near is None else near
         self.far = self.FAR if far is None else far
 
-        """
-        self.training = (num_rays is not None) and (
-            split in ["train", "trainval"]
-        )
-        """
         self.training = training
 
         self.color_bkgd_aug = color_bkgd_aug
 
         self.weights_file_path = os.path.join(data_dir, weights_file_name)
-        # self.weights = torch.load(weights_file_path)
         
         self.images, self.camtoworlds, self.focal = _load_renderings(
             data_dir, split
@@ -192,7 +172,6 @@ class NeRFLoader(torch.utils.data.Dataset):
             value=(-1.0 if self.OPENGL_CAMERA else 1.0),
         )  # [num_rays, 3]
 
-        # [n_cams, height, width, 3]
         directions = (camera_dirs[:, None, :] * c2w[:, :3, :3]).sum(dim=-1)
         origins = torch.broadcast_to(c2w[:, :3, -1], directions.shape)
         viewdirs = directions / torch.linalg.norm(
