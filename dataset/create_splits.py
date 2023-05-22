@@ -46,6 +46,8 @@ def create():
     VALIDATION_SPLIT = 10
     TEST_SPLIT = 10
 
+    random.seed(1203)
+
     for curr_path in root_paths:
         
         # Get 
