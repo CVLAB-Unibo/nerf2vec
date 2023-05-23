@@ -106,8 +106,18 @@ class Nerf2vecTrainer:
         train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
         self.train_dset = NeRFDataset(train_dset_json, device='cpu') 
 
-        val_dset_json = os.path.abspath(os.path.join('data', 'train.json'))  # TODO: TO UPDATE WITH THE VALIDATION SET!
+        val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))  
         self.val_dset = NeRFDataset(val_dset_json, device='cpu')   
+
+        """
+        test_dset_json = os.path.abspath(os.path.join('data', 'test.json'))  
+        self.test_dset = NeRFDataset(test_dset_json, device='cpu')   
+        print(len(self.train_dset))
+        print(len(self.val_dset))
+        print(len(self.test_dset))
+        print(len(self.test_dset)+len(self.train_dset)+len(self.val_dset))
+        exit()
+        """
 
         encoder = Encoder(
             config.MLP_UNITS,

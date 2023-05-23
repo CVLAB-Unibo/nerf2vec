@@ -35,8 +35,12 @@ def cycle_path(nerfs_root):
 
 def create():
     # root_paths = ['data', 'augmented1', 'augmented2']
-    root_paths = ['/media/data4TB/sirocchi/nerf2vec/data', '/media/data4TB/sirocchi/nerf2vec/data_1']
-    root_paths = ['C:\\Users\\dsiro\\Documents\\Projects\\nerf2vec\\data\\data_TRAINED']
+    root_paths = [
+        '/media/data4TB/sirocchi/nerf2vec/data/data_TRAINED', 
+        '/media/data4TB/sirocchi/nerf2vec/data/data_TRAINED_A1', 
+        '/media/data4TB/sirocchi/nerf2vec/data/data_TRAINED_A2'
+    ]
+    # root_paths = ['C:\\Users\\dsiro\\Documents\\Projects\\nerf2vec\\data\\data_TRAINED']
 
     train = []
     validation = []
