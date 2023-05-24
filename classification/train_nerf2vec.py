@@ -175,14 +175,15 @@ class Nerf2vecTrainer:
         
 
     def logfn(self, values: Dict[str, Any]) -> None:
-        wandb.log(values, step=self.global_step, commit=False)
+        # wandb.log(values, step=self.global_step, commit=False)
+        print(values)
         
     
     def unzip_occupancy_grids(self, batch_idx: int, nerf_indices: List[int], nerf_paths: List[str], unzip_folder='grids'):
         N_CACHED_GRIDS = 512
         if batch_idx == 0 or batch_idx % (N_CACHED_GRIDS/config.BATCH_SIZE) == 0: 
             
-            # start_unzip = time.time()
+            start_unzip = time.time()
             
             shutil.rmtree(unzip_folder)
             path = Path(unzip_folder)
@@ -206,8 +207,8 @@ class Nerf2vecTrainer:
             pool.close()
             pool.join()
 
-            # end_unzip=time.time()
-            # print(f'Grids unzip completed in {end_unzip-start_unzip}s')
+            end_unzip=time.time()
+            print(f'Grids unzip completed in {end_unzip-start_unzip}s')
     
     def create_data_loader(self, dataset, shuffle=True) -> DataLoader:
         
@@ -222,19 +223,20 @@ class Nerf2vecTrainer:
 
         # Create the DataLoader with the cyclic index iterator
         loader = DataLoader(
-            self.train_dset,
+            dataset,
             batch_size=config.BATCH_SIZE,
             sampler=index_iterator,
             shuffle=False,
             num_workers=8, 
             persistent_workers=True
+            # prefetch_factor=16
         )
 
         return loader, indices, dataset.nerf_paths
 
     def train(self):
 
-        self.config_wandb()
+        # self.config_wandb()
 
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
@@ -249,9 +251,10 @@ class Nerf2vecTrainer:
             
             print(f'Epoch {epoch} started...')         
             epoch_start = time.time()
+            batch_start = time.time()
 
             for batch_idx, batch in enumerate(train_loader):
-                
+                print(f'Batch {batch_idx} started...')
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 train_nerf, _, matrices, grid_weights_path = batch
                 rays = train_nerf['rays']
@@ -300,6 +303,9 @@ class Nerf2vecTrainer:
                 self.optimizer.step()
                 
                 self.global_step += 1
+
+                batch_end = time.time()
+                print(f'Completed {batch_idx} batches in {batch_end-batch_start}s')        
 
             if epoch % 10 == 0 or epoch == num_epochs - 1:
                 
