@@ -62,10 +62,10 @@ def start_grids_generation(nerf_root):
 
     nerf_weights_file_name = 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth'
     compressed_grid_file_name = 'grid.pth.gz'
-    grid_file_name = 'grid.pth'
+    grid_file_name = 'grid_128.pth'
 
     generated_grids = 0
-    N_GRIDS_LOG = 1000
+    N_GRIDS_LOG = 100
 
     device = 'cuda:0'
     radiance_field = NGPradianceField(**config.INSTANT_NGP_MLP_CONF).to(device)
@@ -73,7 +73,6 @@ def start_grids_generation(nerf_root):
 
     start_time = time.time()
 
-    to_skip = ['/media/data4TB/sirocchi/nerfacc_nerf2vec/data_TRAINED_A1/02691156/604392af2cbb7d1fe30ec10233e7931a_A1']
     to_skip = []
 
     for class_name in os.listdir(nerf_root):
@@ -89,10 +88,11 @@ def start_grids_generation(nerf_root):
             subject_dir = os.path.join(subject_dirs, subject_name)
             weights_dir = os.path.join(subject_dir, nerf_weights_file_name)
 
-            print(f'Generating grid: {subject_dir}')
+            # print(f'Generating grid: {subject_dir}')
 
             grid_compressed_dir = os.path.join(subject_dir, compressed_grid_file_name)
-            if os.path.exists(grid_compressed_dir):
+            grid_dir =  os.path.join(subject_dir, grid_file_name)
+            if os.path.exists(grid_dir):
                 print('ALREADY EXISTS!')
             elif not os.path.exists(weights_dir):
                 with open(os.path.join('dataset', 'error_log.txt'), 'a') as f:
@@ -111,15 +111,17 @@ def start_grids_generation(nerf_root):
                 )
 
                 dict = {
-                    'occs': grid.state_dict()['occs'].half(),
+                    # 'occs': grid.state_dict()['occs'].half(),
                     '_roi_aabb': grid.state_dict()['_roi_aabb'].half(),
                     '_binary': grid.state_dict()['_binary'].to_sparse(),
                     'resolution': grid.state_dict()['resolution'].half()
                 }
+                torch.save(dict, grid_dir)
 
-                
+                """
                 with gzip.open(grid_compressed_dir, 'wb') as f:
                     torch.save(dict, f)
+                """
                 
                 """
                 # Uncompressed dictionary
@@ -141,8 +143,8 @@ def start_grids_generation(nerf_root):
 
                 if generated_grids > 0 and generated_grids % N_GRIDS_LOG == 0:
                     end_time = time.time()
-                    print(f'Generated {N_GRIDS_LOG} grids in {end_time - start_time:.2f}s')
-                    start_time = time.time()
+                    print(f'Generated {generated_grids} grids in {end_time - start_time:.2f}s')
+                    # start_time = time.time()
                     
 
                 

@@ -15,6 +15,13 @@ def generate_grids():
                   os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerfacc_nerf2vec', 'data_TRAINED_A1'),
                   os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerfacc_nerf2vec', 'data')]
 
+    # TODO: CHECK THAT ALSO THE FIRST 100 GRIDS CREATED IN DATA_TRAINED_A1 HAVE THE CORRECT DIMENSION!
+    nerf_roots = [
+        os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerf2vec', 'data', 'data_TRAINED'),
+        os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerf2vec', 'data', 'data_TRAINED_A1'),
+        os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerf2vec', 'data', 'data_TRAINED_A2')
+        ]
+
     for nerf_root in nerf_roots:
         start_grids_generation(nerf_root)
 

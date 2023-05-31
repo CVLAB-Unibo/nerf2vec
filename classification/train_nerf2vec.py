@@ -1,14 +1,10 @@
 import datetime
 import json
 import math
-import multiprocessing
-import random
-import shutil
 import time
-import imageio
 
 from nerfacc import OccupancyGrid
-from classification.utils import get_grid_file_name, get_mlp_params_as_matrix, get_nerf_name_from_grid, unzip_file
+from classification.utils import get_mlp_params_as_matrix
 
 import os
 import torch
@@ -22,7 +18,7 @@ from models.idecoder import ImplicitDecoder
 from nerf.loader import NeRFLoader
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from classification import config
 from nerf.utils import Rays, render_image
@@ -82,20 +78,13 @@ class NeRFDataset(Dataset):
         matrix = torch.load(nerf_loader.weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
         
-        grid_weights_path = os.path.join('grids', get_grid_file_name(data_dir))
+        # TODO: 
+        # 1) test also without the "_128" (grids with slightly smaller resolution)
+        # 2) try to load the weights in advance, rather than loading before the ray marching
+
+        grid_weights_path = os.path.join(data_dir, 'grid.pth')  
 
         return train_nerf, test_nerf, matrix, grid_weights_path
-    
-
-class CyclicIndexIterator:
-    def __init__(self, indices):
-        self.indices = indices
-
-    def __iter__(self):
-        return iter(self.indices)
-
-    def __len__(self):
-        return len(self.indices)
     
     
 class Nerf2vecTrainer:
@@ -104,20 +93,32 @@ class Nerf2vecTrainer:
         self.device = device
 
         train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
-        self.train_dset = NeRFDataset(train_dset_json, device='cpu') 
+        train_dset = NeRFDataset(train_dset_json, device='cpu') 
+        self.train_loader = DataLoader(
+            train_dset,
+            batch_size=config.BATCH_SIZE,
+            shuffle=True,
+            num_workers=8, 
+            persistent_workers=True  # TODO: check this
+            # prefetch_factor=16
+        )
 
         val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))  
-        self.val_dset = NeRFDataset(val_dset_json, device='cpu')   
-
-        """
-        test_dset_json = os.path.abspath(os.path.join('data', 'test.json'))  
-        self.test_dset = NeRFDataset(test_dset_json, device='cpu')   
-        print(len(self.train_dset))
-        print(len(self.val_dset))
-        print(len(self.test_dset))
-        print(len(self.test_dset)+len(self.train_dset)+len(self.val_dset))
-        exit()
-        """
+        val_dset = NeRFDataset(val_dset_json, device='cpu')   
+        self.val_loader = DataLoader(
+            val_dset,
+            batch_size=config.BATCH_SIZE,
+            shuffle=False,
+            num_workers=8, 
+            persistent_workers=True
+        )
+        self.val_loader_shuffled = DataLoader(
+            val_dset,
+            batch_size=config.BATCH_SIZE,
+            shuffle=True,
+            num_workers=8, 
+            persistent_workers=False
+        )
 
         encoder = Encoder(
             config.MLP_UNITS,
@@ -175,75 +176,19 @@ class Nerf2vecTrainer:
         
 
     def logfn(self, values: Dict[str, Any]) -> None:
-        # wandb.log(values, step=self.global_step, commit=False)
-        print(values)
-        
-    
-    def unzip_occupancy_grids(self, batch_idx: int, nerf_indices: List[int], nerf_paths: List[str], unzip_folder='grids'):
-        N_CACHED_GRIDS = 512
-        if batch_idx == 0 or batch_idx % (N_CACHED_GRIDS/config.BATCH_SIZE) == 0: 
-            
-            start_unzip = time.time()
-            
-            shutil.rmtree(unzip_folder)
-            path = Path(unzip_folder)
-            path.mkdir(parents=True, exist_ok=True)
-            
-            # Retrieve the list of gz files to unzip
-            start_idx = int(batch_idx / (N_CACHED_GRIDS/config.BATCH_SIZE)) * N_CACHED_GRIDS
-            end_idx = start_idx + N_CACHED_GRIDS
-            current_split_indices = nerf_indices[start_idx:end_idx]
-
-            gz_files = [nerf_paths[i] for i in current_split_indices]
-
-            # Unzip files in parallel
-            pool = multiprocessing.Pool()
-
-            for file_path in gz_files:
-                file_name = get_grid_file_name(file_path)
-                pool.apply_async(unzip_file, args=(file_path, unzip_folder, file_name))
-
-            # Close the pool and wait for the processes to complete
-            pool.close()
-            pool.join()
-
-            end_unzip=time.time()
-            print(f'Grids unzip completed in {end_unzip-start_unzip}s')
-    
-    def create_data_loader(self, dataset, shuffle=True) -> DataLoader:
-        
-        # Create a list of all the possible indices
-        num_samples = len(dataset)
-        indices = list(range(num_samples))
-        if shuffle:
-            random.shuffle(indices)
-
-        # Create the cyclic index iterator
-        index_iterator = CyclicIndexIterator(indices=indices)
-
-        # Create the DataLoader with the cyclic index iterator
-        loader = DataLoader(
-            dataset,
-            batch_size=config.BATCH_SIZE,
-            sampler=index_iterator,
-            shuffle=False,
-            num_workers=8, 
-            persistent_workers=True
-            # prefetch_factor=16
-        )
-
-        return loader, indices, dataset.nerf_paths
+        if config.WANDB_ENABLED:
+            wandb.log(values, step=self.global_step, commit=False)
+        else:
+            print(values)
 
     def train(self):
 
-        # self.config_wandb()
+        self.config_wandb()
 
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
 
         for epoch in range(start_epoch, num_epochs):
-
-            train_loader, train_indices, train_paths = self.create_data_loader(self.train_dset, shuffle=True)
 
             self.epoch = epoch
             self.encoder.train()
@@ -253,7 +198,7 @@ class Nerf2vecTrainer:
             epoch_start = time.time()
             batch_start = time.time()
 
-            for batch_idx, batch in enumerate(train_loader):
+            for batch_idx, batch in enumerate(self.train_loader):
                 print(f'Batch {batch_idx} started...')
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 train_nerf, _, matrices, grid_weights_path = batch
@@ -261,10 +206,6 @@ class Nerf2vecTrainer:
                 pixels = train_nerf['pixels']
                 color_bkgds = train_nerf['color_bkgd']
 
-                self.unzip_occupancy_grids(batch_idx=batch_idx, 
-                                           nerf_indices=train_indices, 
-                                           nerf_paths=train_paths)
-                
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 pixels = pixels.cuda()
                 color_bkgds = color_bkgds.cuda()
@@ -313,11 +254,11 @@ class Nerf2vecTrainer:
                 val_loader_shuffled, val_indices_shuffled, val_paths_shuffled = self.create_data_loader(self.val_dset, shuffle=True)
                 val_loader, val_indices, val_paths = self.create_data_loader(self.val_dset, shuffle=False)
 
-                self.val(loader=train_loader, nerf_indices=train_indices, nerf_paths=train_paths, split='train')
-                self.val(loader=val_loader, nerf_indices=val_indices, nerf_paths=val_paths, split='validation')
+                self.val(loader=self.train_loader, split='train')
+                self.val(loader=val_loader, split='validation')
 
-                self.plot(loader=train_loader, nerf_indices=train_indices, nerf_paths=train_paths, split='train')
-                self.plot(loader=val_loader_shuffled, nerf_indices=val_indices_shuffled, nerf_paths=val_paths_shuffled, split='validation')
+                self.plot(loader=self.train_loader, split='train')
+                self.plot(loader=self.val_loader_shuffled, split='validation')
                 
             if epoch % 50 == 0:
                 self.save_ckpt(all=True)
@@ -328,7 +269,7 @@ class Nerf2vecTrainer:
             print(f'Epoch {epoch} completed in {epoch_end-epoch_start}s')        
     
     @torch.no_grad()
-    def val(self, loader: DataLoader, nerf_indices: List[int], nerf_paths: List[str], split: str) -> None:
+    def val(self, loader: DataLoader, split: str) -> None:
         
         self.encoder.eval()
         self.decoder.eval()
@@ -344,8 +285,6 @@ class Nerf2vecTrainer:
             rays = train_nerf['rays']
             pixels = train_nerf['pixels']
             color_bkgds = train_nerf['color_bkgd']
-
-            self.unzip_occupancy_grids(batch_idx=batch_idx, nerf_indices=nerf_indices, nerf_paths=nerf_paths)
             
             rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
             pixels = pixels.cuda()
@@ -388,7 +327,7 @@ class Nerf2vecTrainer:
             self.save_ckpt(best=True)
     
     @torch.no_grad()
-    def plot(self, loader: DataLoader, nerf_indices: List[int], nerf_paths: List[str], split: str) -> None:
+    def plot(self, loader: DataLoader, split: str) -> None:
         self.encoder.eval()
         self.decoder.eval()
 
@@ -398,8 +337,6 @@ class Nerf2vecTrainer:
         rays = test_nerf['rays']
         pixels = test_nerf['pixels']
         color_bkgds = test_nerf['color_bkgd']
-            
-        self.unzip_occupancy_grids(batch_idx=0, nerf_indices=nerf_indices, nerf_paths=nerf_paths)
         
         rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
         color_bkgds = color_bkgds.cuda()
@@ -463,6 +400,7 @@ class Nerf2vecTrainer:
             torch.save(ckpt, ckpt_path)
     
     def restore_from_last_ckpt(self) -> None:
+        return
         if self.ckpts_path.exists():
             ckpt_paths = [p for p in self.ckpts_path.glob("*.pt") if "best" not in p.name]
             error_msg = "Expected only one ckpt apart from best, found none or too many."
@@ -480,10 +418,10 @@ class Nerf2vecTrainer:
             self.optimizer.load_state_dict(ckpt["optimizer"])
     
     def config_wandb(self):
-        
-        wandb.init(
-            entity='dsr-lab',
-            project='nerf2vec',
-            name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
-            config=config.WANDB_CONFIG
-        )
+        if config.WANDB_ENABLED:
+            wandb.init(
+                entity='dsr-lab',
+                project='nerf2vec',
+                name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
+                config=config.WANDB_CONFIG
+            )

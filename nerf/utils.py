@@ -86,6 +86,7 @@ def render_image(
                 
                 weights = torch.load(grid_weights[batch_idx])
                 weights['_binary'] = weights['_binary'].to_dense()
+                weights['occs'] = torch.empty([884736])   # 884736 if resolution == 96 else 2097152
                 occupancy_grid.load_state_dict(weights)
                 
                 ray_indices, t_starts, t_ends = ray_marching(
