@@ -115,7 +115,7 @@ class Nerf2vecTrainer:
             shuffle=True,
             num_workers=8, 
             persistent_workers=True,  # TODO: check this
-            prefetch_factor=16
+            # prefetch_factor=16
         )
 
         val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))  
@@ -188,30 +188,6 @@ class Nerf2vecTrainer:
 
         self.ckpts_path.mkdir(parents=True, exist_ok=True)
         self.all_ckpts_path.mkdir(parents=True, exist_ok=True)
-    
-    def create_data_loader(self, dataset, shuffle=True) -> DataLoader:
-        
-        # Create a list of all the possible indices
-        num_samples = len(dataset)
-        indices = list(range(num_samples))
-        if shuffle:
-            random.shuffle(indices)
-
-        # Create the cyclic index iterator
-        index_iterator = CyclicIndexIterator(indices=indices)
-
-        # Create the DataLoader with the cyclic index iterator
-        loader = DataLoader(
-            dataset,
-            batch_size=config.BATCH_SIZE,
-            sampler=index_iterator,
-            shuffle=False,
-            num_workers=8, 
-            persistent_workers=True,
-            # prefetch_factor=512
-        )
-
-        return loader, indices, dataset.nerf_paths
 
     def logfn(self, values: Dict[str, Any]) -> None:
         if config.WANDB_ENABLED:
@@ -289,11 +265,8 @@ class Nerf2vecTrainer:
             if epoch % 10 == 0 or epoch == num_epochs - 1:
                 
                 # Create the validation data loaders
-                val_loader_shuffled, val_indices_shuffled, val_paths_shuffled = self.create_data_loader(self.val_dset, shuffle=True)
-                val_loader, val_indices, val_paths = self.create_data_loader(self.val_dset, shuffle=False)
-
                 self.val(loader=self.train_loader, split='train')
-                self.val(loader=val_loader, split='validation')
+                self.val(loader=self.val_loader, split='validation')
 
                 self.plot(loader=self.train_loader, split='train')
                 self.plot(loader=self.val_loader_shuffled, split='validation')
