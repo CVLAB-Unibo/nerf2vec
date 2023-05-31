@@ -1,6 +1,7 @@
 import datetime
 import json
 import math
+import random
 import time
 
 from nerfacc import OccupancyGrid
@@ -83,10 +84,23 @@ class NeRFDataset(Dataset):
         # 2) try to load the weights in advance, rather than loading before the ray marching
 
         grid_weights_path = os.path.join(data_dir, 'grid.pth')  
+        grid_weights = torch.load(grid_weights_path, map_location=self.device)
+        grid_weights['_binary'] = grid_weights['_binary'].to_dense()
+        grid_weights['occs'] = torch.empty([884736])   # 884736 if resolution == 96 else 2097152
 
-        return train_nerf, test_nerf, matrix, grid_weights_path
+        return train_nerf, test_nerf, matrix, grid_weights
     
+class CyclicIndexIterator:
+    def __init__(self, indices):
+        self.indices = indices
+
+    def __iter__(self):
+        return iter(self.indices)
+
+    def __len__(self):
+        return len(self.indices)
     
+
 class Nerf2vecTrainer:
     def __init__(self, device='cuda:0') -> None:
 
@@ -94,13 +108,14 @@ class Nerf2vecTrainer:
 
         train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
         train_dset = NeRFDataset(train_dset_json, device='cpu') 
+        
         self.train_loader = DataLoader(
             train_dset,
             batch_size=config.BATCH_SIZE,
             shuffle=True,
             num_workers=8, 
-            persistent_workers=True  # TODO: check this
-            # prefetch_factor=16
+            persistent_workers=True,  # TODO: check this
+            prefetch_factor=16
         )
 
         val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))  
@@ -173,7 +188,30 @@ class Nerf2vecTrainer:
 
         self.ckpts_path.mkdir(parents=True, exist_ok=True)
         self.all_ckpts_path.mkdir(parents=True, exist_ok=True)
+    
+    def create_data_loader(self, dataset, shuffle=True) -> DataLoader:
         
+        # Create a list of all the possible indices
+        num_samples = len(dataset)
+        indices = list(range(num_samples))
+        if shuffle:
+            random.shuffle(indices)
+
+        # Create the cyclic index iterator
+        index_iterator = CyclicIndexIterator(indices=indices)
+
+        # Create the DataLoader with the cyclic index iterator
+        loader = DataLoader(
+            dataset,
+            batch_size=config.BATCH_SIZE,
+            sampler=index_iterator,
+            shuffle=False,
+            num_workers=8, 
+            persistent_workers=True,
+            # prefetch_factor=512
+        )
+
+        return loader, indices, dataset.nerf_paths
 
     def logfn(self, values: Dict[str, Any]) -> None:
         if config.WANDB_ENABLED:
