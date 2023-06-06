@@ -43,14 +43,12 @@ class NeRFDataset(Dataset):
 
     def __getitem__(self, index) -> Any:
 
-        dataset_kwargs = {}
         data_dir = self.nerf_paths[index]
 
         nerf_loader = NeRFLoader(
             data_dir=data_dir,
             num_rays=config.NUM_RAYS,
-            device=self.device,
-            **dataset_kwargs)
+            device=self.device)
 
         # print(f'focal: {nerf_loader.focal}')
 
@@ -78,15 +76,15 @@ class NeRFDataset(Dataset):
 
         matrix = torch.load(nerf_loader.weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
-        
+
         # TODO: 
         # 1) test also without the "_128" (grids with slightly smaller resolution)
         # 2) try to load the weights in advance, rather than loading before the ray marching
-
         grid_weights_path = os.path.join(data_dir, 'grid.pth')  
         grid_weights = torch.load(grid_weights_path, map_location=self.device)
         grid_weights['_binary'] = grid_weights['_binary'].to_dense()
         grid_weights['occs'] = torch.empty([884736])   # 884736 if resolution == 96 else 2097152
+        
 
         return train_nerf, test_nerf, matrix, grid_weights
     
@@ -115,9 +113,10 @@ class Nerf2vecTrainer:
             shuffle=True,
             num_workers=8, 
             persistent_workers=True,  # TODO: check this
-            # prefetch_factor=16
+            prefetch_factor=2
         )
 
+        """
         val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))  
         val_dset = NeRFDataset(val_dset_json, device='cpu')   
         self.val_loader = DataLoader(
@@ -134,6 +133,7 @@ class Nerf2vecTrainer:
             num_workers=8, 
             persistent_workers=False
         )
+        """
 
         encoder = Encoder(
             config.MLP_UNITS,
@@ -188,6 +188,7 @@ class Nerf2vecTrainer:
 
         self.ckpts_path.mkdir(parents=True, exist_ok=True)
         self.all_ckpts_path.mkdir(parents=True, exist_ok=True)
+
 
     def logfn(self, values: Dict[str, Any]) -> None:
         if config.WANDB_ENABLED:
@@ -264,12 +265,15 @@ class Nerf2vecTrainer:
 
             if epoch % 10 == 0 or epoch == num_epochs - 1:
                 
+                """
                 # Create the validation data loaders
                 self.val(loader=self.train_loader, split='train')
                 self.val(loader=self.val_loader, split='validation')
 
                 self.plot(loader=self.train_loader, split='train')
                 self.plot(loader=self.val_loader_shuffled, split='validation')
+                """
+                pass
                 
             if epoch % 50 == 0:
                 self.save_ckpt(all=True)
@@ -278,6 +282,8 @@ class Nerf2vecTrainer:
             
             epoch_end = time.time()
             print(f'Epoch {epoch} completed in {epoch_end-epoch_start}s')        
+            with open('train_time_log.txt', 'a') as f:
+                f.write(f'Epoch {epoch} completed in {epoch_end-epoch_start}s\n')    
     
     @torch.no_grad()
     def val(self, loader: DataLoader, split: str) -> None:

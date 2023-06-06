@@ -9,8 +9,13 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 import torch.nn.functional as F
+import concurrent
 
 from nerf.utils import Rays
+
+
+def read_image(file_path):
+    return imageio.imread(file_path)
 
 
 def _load_renderings(data_dir: str, split: str):
@@ -22,15 +27,22 @@ def _load_renderings(data_dir: str, split: str):
     images = []
     camtoworlds = []
 
+    file_paths = []
     for i in range(len(meta["frames"])):
         frame = meta["frames"][i]
         fname = os.path.join(data_dir, frame["file_path"] + ".png")
-        rgba = imageio.imread(fname)
         
-        camtoworlds.append(frame["transform_matrix"])
-        images.append(rgba)
-        
+        file_paths.append(fname)
 
+        camtoworlds.append(frame["transform_matrix"])
+        #rgba = imageio.imread(fname)
+        #images.append(rgba)
+        
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = executor.map(read_image, file_paths)
+        images = list(results)
+    
+    
     images = np.stack(images, axis=0)
     camtoworlds = np.stack(camtoworlds, axis=0)
 
@@ -40,6 +52,95 @@ def _load_renderings(data_dir: str, split: str):
 
     return images, camtoworlds, focal
 
+"""
+def decode_images(dictionary, key):
+
+    image_bytes_list = dictionary.get(key, [])
+    decoded_image_list = []
+
+    for image_bytes in image_bytes_list:
+        try:
+            decoded_image = imageio.imread(image_bytes)
+            decoded_image_list.append(decoded_image)
+        except Exception as e:
+            print(f"Error decoding image for key '{key}': {str(e)}")
+
+    return decoded_image_list
+
+def _load_renderings_from_RAM2(data_dir: str, split: str, images_RAM: dict):
+    
+    with open(
+        os.path.join(data_dir, "transforms_{}.json".format(split)), "r"
+    ) as fp:
+        meta = json.load(fp)
+    
+    camtoworlds = []
+
+    file_paths = []
+    
+    for i in range(len(meta["frames"])):
+        frame = meta["frames"][i]
+        fname = os.path.join(data_dir, frame["file_path"] + ".png")
+        file_paths.append(fname)
+
+        #rgba = cv2.imread(fname, cv2.IMREAD_UNCHANGED)
+        #rgba = cv2.cvtColor(rgba, cv2.COLOR_BGR2RGBA)
+        
+        camtoworlds.append(frame["transform_matrix"])
+
+
+        
+    images = decode_images(images_RAM, data_dir) 
+    images = np.stack(images, axis=0)
+    camtoworlds = np.stack(camtoworlds, axis=0)
+
+    h, w = images.shape[1:3]
+    camera_angle_x = float(meta["camera_angle_x"])
+    focal = 0.5 * w / np.tan(0.5 * camera_angle_x)
+
+    return images, camtoworlds, focal
+
+def _load_renderings_from_RAM( data_dir: str, split: str, images_RAM: dict):
+    
+    with open(
+        os.path.join(data_dir, "transforms_{}.json".format(split)), "r"
+    ) as fp:
+        meta = json.load(fp)
+    images = []
+    camtoworlds = []
+
+    file_paths = []
+    
+    for i in range(len(meta["frames"])):
+        frame = meta["frames"][i]
+        fname = os.path.join(data_dir, frame["file_path"] + ".png")
+        file_paths.append(fname)
+
+        #rgba = cv2.imread(fname, cv2.IMREAD_UNCHANGED)
+        #rgba = cv2.cvtColor(rgba, cv2.COLOR_BGR2RGBA)
+        
+        camtoworlds.append(frame["transform_matrix"])
+
+    if '_A1' in data_dir:
+        images = decode_images(images_RAM[0], data_dir)
+    #elif '_A2' in data_dir:
+    #    images = decode_images(images_RAM[1], data_dir)
+    else:
+        # images = decode_images(images_RAM[2], data_dir)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = executor.map(read_image, file_paths)
+            images = list(results)
+        
+        
+    images = np.stack(images, axis=0)
+    camtoworlds = np.stack(camtoworlds, axis=0)
+
+    h, w = images.shape[1:3]
+    camera_angle_x = float(meta["camera_angle_x"])
+    focal = 0.5 * w / np.tan(0.5 * camera_angle_x)
+
+    return images, camtoworlds, focal
+"""
 
 class NeRFLoader(torch.utils.data.Dataset):
 
@@ -57,7 +158,8 @@ class NeRFLoader(torch.utils.data.Dataset):
         far: float = None,
         device: str = "cuda:0",
         weights_file_name: str = "bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth",
-        training: bool = True
+        training: bool = True,
+        images_RAM = None
     ):
         super().__init__()
         assert color_bkgd_aug in ["white", "black", "random"]
@@ -67,12 +169,14 @@ class NeRFLoader(torch.utils.data.Dataset):
 
         self.training = training
 
+        self.images_RAM = images_RAM
+
         self.color_bkgd_aug = color_bkgd_aug
 
         self.weights_file_path = os.path.join(data_dir, weights_file_name)
         
-        self.images, self.camtoworlds, self.focal = _load_renderings(
-            data_dir, split
+        self.images, self.camtoworlds, self.focal = _load_renderings(#_from_RAM(
+            data_dir, split#, self.images_RAM
         )
         self.images = torch.from_numpy(self.images).to(device).to(torch.uint8)
         self.camtoworlds = (
