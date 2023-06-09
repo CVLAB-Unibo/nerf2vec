@@ -257,10 +257,10 @@ class Nerf2vecTrainer:
                 batch_end = time.time()
                 print(f'Completed {batch_idx} batches in {batch_end-batch_start}s')
 
-            if epoch % 50 == 0 or epoch == num_epochs - 1:
+            if epoch % 10 == 0 or epoch == num_epochs - 1:
                 
-                #del rays, color_bkgds, matrices_flattened, rgb, pixels, acc
-                #torch.cuda.empty_cache()
+                del rays, color_bkgds, matrices_flattened, rgb, pixels, acc
+                torch.cuda.empty_cache()
                 
                 # Create the validation data loaders
                 self.val(loader=self.train_loader, split='train')
@@ -284,7 +284,6 @@ class Nerf2vecTrainer:
         self.encoder.eval()
         self.decoder.eval()
 
-        wandb_log = {}  # TODO: to be removed. Used only for creating temporary logs
         psnrs = []
         idx = 0
 
@@ -334,27 +333,9 @@ class Nerf2vecTrainer:
             psnr = -10.0 * torch.log(mse) / np.log(10.0)
             psnrs.append(psnr.item())
 
-            # ####################
-            # LOG TO REMOVE
-            # ####################
-            compressed_dir = []
-            for dir in data_dir:
-                directories = os.path.normpath(dir).split(os.sep)
-                last_two_dirs = directories[-2:]
-                file_name = '/'.join(last_two_dirs)
-                compressed_dir.append(file_name)
-            
-            compressed_dir = ','.join(compressed_dir)
-            wandb_log[compressed_dir] = psnrs[-1]
-            # ####################
-
             if idx > 99:
                 break
             idx+=1
-        
-        # TODO: remove this temporary log
-        for key, value in wandb_log.items():
-            print(f'{key}: {value}')
         
         mean_psnr = sum(psnrs) / len(psnrs)
 
@@ -364,8 +345,8 @@ class Nerf2vecTrainer:
             self.best_psnr = mean_psnr
             self.save_ckpt(best=True)
         
-        #del rays, color_bkgds, matrices_flattened, rgb, pixels
-        #torch.cuda.empty_cache()
+        del rays, color_bkgds, matrices_flattened, rgb, pixels
+        torch.cuda.empty_cache()
     
     @torch.no_grad()
     def plot(self, loader: DataLoader, split: str) -> None:
@@ -436,8 +417,8 @@ class Nerf2vecTrainer:
                 (pixels.cpu().detach().numpy()[idx] * 255).astype(np.uint8)
             )
             """
-        #del rays, color_bkgds, matrices_flattened, rgb, pixels
-        #torch.cuda.empty_cache()
+        del rays, color_bkgds, matrices_flattened, rgb, pixels
+        torch.cuda.empty_cache()
             
             
 

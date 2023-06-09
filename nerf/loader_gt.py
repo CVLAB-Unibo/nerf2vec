@@ -15,7 +15,7 @@ from nerf.utils import Rays
 def _load_renderings(data_dir: str, split: str, h: int, w: int):
     
     with open(
-        os.path.join(data_dir, "transforms_{}.json".format(split)), "r"
+        os.path.join(data_dir, "transforms_{}_compressed.json".format(split)), "r"
     ) as fp:
         meta = json.load(fp)
 

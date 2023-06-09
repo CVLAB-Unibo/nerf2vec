@@ -3,11 +3,10 @@ from typing import Optional
 
 import numpy as np
 import torch
-# from utils import Rays, namedtuple_map
 import collections
 import torch.nn.functional as F
 
-from nerfacc import OccupancyGrid, ray_marching, rendering
+from nerfacc import OccupancyGrid, ray_marching, render_visibility, rendering
 
 Rays = collections.namedtuple("Rays", ("origins", "viewdirs"))
 
@@ -66,7 +65,7 @@ def render_image(
     chunk = (
         torch.iinfo(torch.int32).max
         if radiance_field.training or batch_size > 1
-        else 8192
+        else 4096
     )
     
     for i in range(0, num_rays, chunk):
@@ -126,7 +125,6 @@ def render_image(
 
             MAX_SIZE = 35000  # Desired maximum size  # TODO: add a configuration variable
             padding_masks = [None]*batch_size
-
             if radiance_field.training or batch_size > 1:
                 for batch_idx in range(batch_size):
 
@@ -142,7 +140,7 @@ def render_image(
                         For the positions pad with a value that is outside the bbox. This will force the decoder to consider
                         these points with density equal to 0, and they will not have any relevance in the computation of the loss.
                         '''
-                        b_positions[batch_idx] = F.pad(b_positions[batch_idx], pad=(0, 0, 0, padding_size), value=0.8)  
+                        b_positions[batch_idx] = F.pad(b_positions[batch_idx], pad=(0, 0, 0, padding_size), value=2.0)  
                         b_t_starts[batch_idx] = F.pad(b_t_starts[batch_idx], pad=(0, 0, 0, padding_size))
                         b_t_ends[batch_idx] = F.pad(b_t_ends[batch_idx], pad=(0, 0, 0, padding_size))
                         b_ray_indices[batch_idx] = F.pad(b_ray_indices[batch_idx], pad=(0, padding_size))
@@ -173,7 +171,6 @@ def render_image(
         for curr_batch_idx in range(batch_size):
             
             curr_mask = padding_masks[curr_batch_idx]
-
             rgb, opacity, depth = rendering(
                 b_t_starts[curr_batch_idx][curr_mask] if curr_mask is not None else b_t_starts[curr_batch_idx],
                 b_t_ends[curr_batch_idx][curr_mask] if curr_mask is not None else b_t_ends[curr_batch_idx],
@@ -182,7 +179,8 @@ def render_image(
                 rgb_sigma_fn=rgb_sigma_fn,
                 render_bkgd=render_bkgd[curr_batch_idx],
             )
-            chunk_results = [rgb, opacity, depth, len(b_t_starts[curr_batch_idx][curr_mask]) if curr_mask is not None else len(b_t_starts[curr_batch_idx])]
+            
+            chunk_results = [rgb, opacity, depth, len(b_t_starts[curr_batch_idx])]
             
             # Append to results array
             if curr_batch_idx < len(results):
@@ -208,3 +206,123 @@ def render_image(
     return (
         colors, opacities, depths, n_rendering_samples
     )
+
+@torch.no_grad()
+def render_image_GT(
+    # scene
+    radiance_field: torch.nn.Module,
+    occupancy_grid: OccupancyGrid,
+    rays: Rays,
+    scene_aabb: torch.Tensor,
+    # rendering options
+    near_plane: Optional[float] = None,
+    far_plane: Optional[float] = None,
+    render_step_size: float = 1e-3,
+    color_bkgds: Optional[torch.Tensor] = None,
+    cone_angle: float = 0.0,
+    alpha_thre: float = 0.0,
+    # test options
+    test_chunk_size: int = 8192,
+    # only useful for dnerf
+    timestamps: Optional[torch.Tensor] = None,
+    grid_weights  = None,
+    ngp_mlp_weights= None,
+    ngp_mlp=None,
+    device='cuda:0'
+):
+    rays_shape = rays.origins.shape
+    if len(rays_shape) == 4:
+        batch_size, height, width, _ = rays_shape
+        num_rays = height * width
+        rays = namedtuple_map(
+            lambda r: r.reshape([batch_size] + [num_rays] + list(r.shape[3:])), rays
+        )
+        pixels = torch.empty((batch_size, height, width, 3), device=device)
+    else:
+        batch_size, num_rays, _ = rays_shape
+        pixels = torch.empty((batch_size, num_rays, 3), device=device)
+
+    def sigma_fn(t_starts, t_ends, ray_indices):
+        t_origins = chunk_rays.origins[ray_indices]
+        t_dirs = chunk_rays.viewdirs[ray_indices]
+        positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+        if timestamps is not None:
+            # dnerf
+            t = (
+                timestamps[ray_indices]
+                if radiance_field.training
+                else timestamps.expand_as(positions[:, :1])
+            )
+            return radiance_field.query_density(positions, t)
+        
+        _, density = radiance_field._query_density_and_rgb(positions, None)
+        return density
+
+    def rgb_sigma_fn(t_starts, t_ends, ray_indices):
+        t_origins = chunk_rays.origins[ray_indices]
+        t_dirs = chunk_rays.viewdirs[ray_indices]
+        positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+        if timestamps is not None:
+            # dnerf
+            t = (
+                timestamps[ray_indices]
+                if radiance_field.training
+                else timestamps.expand_as(positions[:, :1])
+            )
+            return radiance_field(positions, t, t_dirs)
+        return radiance_field(positions, t_dirs)
+
+
+    for batch_idx in range(batch_size):
+        curr_bkgd = color_bkgds[batch_idx]
+        curr_grid_weights = {
+            '_roi_aabb': grid_weights['_roi_aabb'][batch_idx],
+            '_binary': grid_weights['_binary'][batch_idx],
+            'resolution': grid_weights['resolution'][batch_idx],
+            'occs': grid_weights['occs'][batch_idx],
+        }
+        curr_ngp_mlp_weights = {
+            'mlp_base.params': ngp_mlp_weights['mlp_base.params'][batch_idx]
+        }
+
+        ngp_mlp.load_state_dict(curr_ngp_mlp_weights)
+        occupancy_grid.load_state_dict(curr_grid_weights)
+
+        curr_rays = Rays(origins=rays.origins[batch_idx], viewdirs=rays.viewdirs[batch_idx])
+
+        results = []
+        chunk = torch.iinfo(torch.int32).max
+
+        for i in range(0, num_rays, chunk):
+            chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], curr_rays)
+            ray_indices, t_starts, t_ends = ray_marching(
+                chunk_rays.origins,
+                chunk_rays.viewdirs,
+                scene_aabb=scene_aabb,
+                grid=occupancy_grid,
+                sigma_fn=sigma_fn,
+                near_plane=near_plane,
+                far_plane=far_plane,
+                render_step_size=render_step_size,
+                stratified=radiance_field.training,
+                cone_angle=cone_angle,
+                alpha_thre=alpha_thre,
+            )
+            rgb, opacity, depth = rendering(
+                t_starts,
+                t_ends,
+                ray_indices,
+                n_rays=chunk_rays.origins.shape[0],
+                rgb_sigma_fn=rgb_sigma_fn,
+                render_bkgd=curr_bkgd,
+            )
+            chunk_results = [rgb, opacity, depth, len(t_starts)]
+            results.append(chunk_results)
+        colors, _, _, _ = [
+            torch.cat(r, dim=0) if isinstance(r[0], torch.Tensor) else r
+            for r in zip(*results)
+        ]
+
+        pixels[batch_idx] = colors.view((*rays_shape[1:-1], -1))
+
+    return pixels
