@@ -32,6 +32,7 @@ WD = 1e-2
 #
 # GRID
 #
+import os
 from nerfacc import ContractionType
 GRID_AABB = [-0.7, -0.7, -0.7, 0.7, 0.7, 0.7]
 GRID_RESOLUTION = 96
@@ -84,7 +85,6 @@ TINY_CUDA_MIN_SIZE = 16
 # LOGGING
 # ####################
 """
-WANDB_ENABLED = True
 WANDB_CONFIG = {
     'ENCODER_EMBEDDING_DIM': ENCODER_EMBEDDING_DIM,
     'ENCODER_HIDDEN_DIM': ENCODER_HIDDEN_DIM,
@@ -101,49 +101,7 @@ WANDB_CONFIG = {
     "GRID_RESOLUTION": GRID_RESOLUTION
 }
 
-"""
-# ####################
-# DATA
-# ####################
-"""
-#
-# CLASSES
-#
-"""
-labels = {
-    "airplane": "02691156",
-    "bench": "02828884",
-    "cabinet": "02933112",
-    "car": "02958343",
-    "tablet": '02992529',
-    "chair": "03001627",
-    "display": "03211117",
-    "lamp": "03636649",
-    "speaker": "03691459",
-    "gun": "03948459",
-    "rifle": "04090263",
-    "sofa": "04256520",
-    "table": "04379243",
-    "phone": "04401088",
-    "watercraft": "04530566"
-}
-"""
 
-LABELS_TO_IDS = {
-    "02691156": 0,
-    "02828884": 1,
-    "02933112": 2,
-    "02958343": 3,
-    '02992529': 4,
-    "03001627": 5,
-    "03211117": 6,
-    "03636649": 7,
-    "03691459": 8,
-    "03948459": 9,
-    "04090263": 10,
-    "04256520": 11,
-    "04379243": 12,
-    "04401088": 13,
-    "04530566": 14
-}
+
+
 

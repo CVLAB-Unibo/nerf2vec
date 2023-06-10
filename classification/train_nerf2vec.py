@@ -96,7 +96,7 @@ class Nerf2vecTrainer:
             batch_size=config.BATCH_SIZE,
             shuffle=True,
             num_workers=8, 
-            persistent_workers=True,  # TODO: check this
+            persistent_workers=False,  # TODO: check this
             prefetch_factor=2,
             #pin_memory=True
         )
@@ -179,10 +179,7 @@ class Nerf2vecTrainer:
 
 
     def logfn(self, values: Dict[str, Any]) -> None:
-        if config.WANDB_ENABLED:
-            wandb.log(values, step=self.global_step, commit=False)
-        else:
-            print(values)
+        wandb.log(values, step=self.global_step, commit=False)
 
     def train(self):
 
@@ -202,7 +199,7 @@ class Nerf2vecTrainer:
             batch_start = time.time()
 
             for batch_idx, batch in enumerate(self.train_loader):
-                print(f'Batch {batch_idx} started...')
+                # print(f'Batch {batch_idx} started...')
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir = batch
                 rays = train_nerf['rays']
@@ -255,11 +252,12 @@ class Nerf2vecTrainer:
                 self.global_step += 1
 
                 batch_end = time.time()
-                print(f'Completed {batch_idx} batches in {batch_end-batch_start}s')
+                if batch_idx % 50 == 0:
+                    print(f'Completed {batch_idx} batches in {batch_end-batch_start}s')
 
             if epoch % 10 == 0 or epoch == num_epochs - 1:
                 
-                del rays, color_bkgds, matrices_flattened, rgb, pixels, acc
+                del rays, color_bkgds, matrices_flattened, rgb, pixels, acc, embeddings
                 torch.cuda.empty_cache()
                 
                 # Create the validation data loaders
@@ -345,7 +343,7 @@ class Nerf2vecTrainer:
             self.best_psnr = mean_psnr
             self.save_ckpt(best=True)
         
-        del rays, color_bkgds, matrices_flattened, rgb, pixels
+        del rays, color_bkgds, matrices_flattened, rgb, pixels, embeddings
         torch.cuda.empty_cache()
     
     @torch.no_grad()
@@ -417,7 +415,7 @@ class Nerf2vecTrainer:
                 (pixels.cpu().detach().numpy()[idx] * 255).astype(np.uint8)
             )
             """
-        del rays, color_bkgds, matrices_flattened, rgb, pixels
+        del rays, color_bkgds, matrices_flattened, rgb, pixels, embeddings
         torch.cuda.empty_cache()
             
             
@@ -454,6 +452,7 @@ class Nerf2vecTrainer:
             assert len(ckpt_paths) == 1, error_msg
 
             ckpt_path = ckpt_paths[0]
+            print(f'loading weights: {ckpt_path}')
             ckpt = torch.load(ckpt_path)
 
             self.epoch = ckpt["epoch"] + 1
@@ -465,10 +464,9 @@ class Nerf2vecTrainer:
             self.optimizer.load_state_dict(ckpt["optimizer"])
     
     def config_wandb(self):
-        if config.WANDB_ENABLED:
-            wandb.init(
-                entity='dsr-lab',
-                project='nerf2vec',
-                name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
-                config=config.WANDB_CONFIG
-            )
+        wandb.init(
+            entity='dsr-lab',
+            project='nerf2vec',
+            name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
+            config=config.WANDB_CONFIG
+        )
