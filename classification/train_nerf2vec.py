@@ -73,8 +73,7 @@ class NeRFDataset(Dataset):
         matrix_flattened = get_mlp_params_as_matrix(matrix_unflattened['mlp_base.params'])
 
         # TODO: 
-        # 1) test also without the "_128" (grids with slightly smaller resolution)
-        # 2) try to load the weights in advance, rather than loading before the ray marching
+        # - test also without the "_128" (grids with slightly smaller resolution)
         grid_weights_path = os.path.join(data_dir, 'grid.pth')  
         grid_weights = torch.load(grid_weights_path, map_location=self.device)
         grid_weights['_binary'] = grid_weights['_binary'].to_dense()
@@ -119,7 +118,6 @@ class Nerf2vecTrainer:
             persistent_workers=False
         )
         
-
         encoder = Encoder(
             config.MLP_UNITS,
             config.ENCODER_HIDDEN_DIM,
@@ -244,10 +242,12 @@ class Nerf2vecTrainer:
                 # compute loss
                 loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
                 self.optimizer.zero_grad()
-
                 # do not unscale it because we are using Adam.
                 self.grad_scaler.scale(loss).backward()
                 self.optimizer.step()
+
+                if self.global_step % 10 == 0:
+                    self.logfn({"train/loss": loss.item()})
                 
                 self.global_step += 1
 
@@ -257,15 +257,11 @@ class Nerf2vecTrainer:
 
             if epoch % 10 == 0 or epoch == num_epochs - 1:
                 
-                del rays, color_bkgds, matrices_flattened, rgb, pixels, acc, embeddings
-                torch.cuda.empty_cache()
-                
-                # Create the validation data loaders
-                self.val(loader=self.train_loader, split='train')
-                self.val(loader=self.val_loader, split='validation')
+                self.val(split='train')
+                self.val(split='validation')
 
-                self.plot(loader=self.train_loader, split='train')
-                self.plot(loader=self.val_loader_shuffled, split='validation')
+                self.plot(split='train')
+                self.plot(split='validation')
 
                 
             if epoch % 50 == 0:
@@ -277,8 +273,10 @@ class Nerf2vecTrainer:
             print(f'Epoch {epoch} completed in {epoch_end-epoch_start}s')        
     
     @torch.no_grad()
-    def val(self, loader: DataLoader, split: str) -> None:
+    def val(self, split: str) -> None:
         
+        loader = self.train_loader if split == "train" else self.val_loader
+
         self.encoder.eval()
         self.decoder.eval()
 
@@ -342,13 +340,12 @@ class Nerf2vecTrainer:
         if split == "val" and mean_psnr > self.best_psnr:
             self.best_psnr = mean_psnr
             self.save_ckpt(best=True)
-        
-        del rays, color_bkgds, matrices_flattened, rgb, pixels, embeddings
-        torch.cuda.empty_cache()
     
     @torch.no_grad()
-    def plot(self, loader: DataLoader, split: str) -> None:
+    def plot(self, split: str) -> None:
         
+        loader = self.train_loader if split == "train" else self.val_loader_shuffled
+
         print('Plot started...')
 
         self.encoder.eval()
@@ -356,11 +353,12 @@ class Nerf2vecTrainer:
 
         loader_iter = iter(loader)
         _, test_nerf, matrices_unflattened, matrices_flattened, grid_weights, _ = next(loader_iter)
-
+        
         rays = test_nerf['rays']
         color_bkgds = test_nerf['color_bkgd']
-
+        
         rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
+
         color_bkgds = color_bkgds.cuda()
         matrices_flattened = matrices_flattened.cuda()
 
@@ -374,8 +372,9 @@ class Nerf2vecTrainer:
                         grid_weights=grid_weights,
                         ngp_mlp_weights=matrices_unflattened,
                         ngp_mlp=self.ngp_mlp,
-                        device=self.device)
-        
+                        device=self.device,
+                        training=False)
+    
         embeddings = self.encoder(matrices_flattened)
 
         for idx in range(len(matrices_flattened)):
@@ -386,21 +385,23 @@ class Nerf2vecTrainer:
                 'resolution': [grid_weights['resolution'][idx]],
                 'occs': [grid_weights['occs'][idx]],
             }
-
+       
             rgb, _, _, _ = render_image(
-                self.decoder,
-                embeddings[idx].unsqueeze(dim=0),
-                self.occupancy_grid,
-                Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
-                self.scene_aabb,
+                radiance_field=self.decoder,
+                embeddings=embeddings[idx].unsqueeze(dim=0),
+                occupancy_grid=self.occupancy_grid,
+                rays=Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
+                scene_aabb=self.scene_aabb,
                 render_step_size=self.render_step_size,
                 render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
                 grid_weights=curr_grid_weights
             )
 
-            pred_image = wandb.Image((rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8)) 
-            gt_image = wandb.Image((pixels.cpu().detach().numpy()[idx] * 255).astype(np.uint8))
+            pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
+            gt_image = wandb.Image((pixels.to('cpu').detach().numpy()[idx] * 255).astype(np.uint8))
+
             self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image]})
+        
 
             """
             #img_name = get_nerf_name_from_grid(grid_weights_path[idx])
@@ -415,8 +416,6 @@ class Nerf2vecTrainer:
                 (pixels.cpu().detach().numpy()[idx] * 255).astype(np.uint8)
             )
             """
-        del rays, color_bkgds, matrices_flattened, rgb, pixels, embeddings
-        torch.cuda.empty_cache()
             
             
 

@@ -228,7 +228,8 @@ def render_image_GT(
     grid_weights  = None,
     ngp_mlp_weights= None,
     ngp_mlp=None,
-    device='cuda:0'
+    device='cuda:0',
+    training=True
 ):
     rays_shape = rays.origins.shape
     if len(rays_shape) == 4:
@@ -291,7 +292,12 @@ def render_image_GT(
         curr_rays = Rays(origins=rays.origins[batch_idx], viewdirs=rays.viewdirs[batch_idx])
 
         results = []
-        chunk = torch.iinfo(torch.int32).max
+        
+        chunk = (
+            torch.iinfo(torch.int32).max
+            if training
+            else 4096
+        )
 
         for i in range(0, num_rays, chunk):
             chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], curr_rays)
