@@ -1,3 +1,12 @@
+'''
+This simple module is responsible to create a compressed version of the transform jsons
+output by the rendering scripts.
+This has been done for optimizing the I/O operation, rougly halving the size of these
+jsons.
+
+In the future, rather than executing this script, would be better to update directly
+the rendering scripts.
+'''
 import json
 import os
 import re

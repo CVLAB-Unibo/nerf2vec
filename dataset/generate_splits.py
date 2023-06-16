@@ -1,4 +1,8 @@
-
+"""
+This module is responsible for creating the train, validation and test splits.
+In particular, it creates 3 JSONs, and each of them contains an array with the paths
+where the NeRFs are located.
+"""
 import json
 import math
 import os

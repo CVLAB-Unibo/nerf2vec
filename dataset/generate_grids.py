@@ -1,4 +1,8 @@
-import gzip
+'''
+This module is responsible of creating the grids that are required so as to perform an
+efficient ray marching. Without these grids, the ray marching becomes slow. Moreover,
+the training time required for reconstructing a model is much longer.
+'''
 import math
 import os
 import time
@@ -14,16 +18,14 @@ def generate_occupancy_grid(
         aabb, 
         n_iterations, 
         n_warmups,
-        radiance_field):
+        radiance_field,
+        grid_resolution):
 
         matrix = torch.load(weights_path)
         radiance_field.load_state_dict(matrix)
         radiance_field.eval()
 
-        # Create the OccupancyGrid
         render_n_samples = 1024
-        grid_resolution = 128
-        
         contraction_type = ContractionType.AABB
         scene_aabb = torch.tensor(aabb, dtype=torch.float32, device=device)
         render_step_size = (
@@ -60,9 +62,10 @@ def generate_occupancy_grid(
 
 def start_grids_generation(nerf_root):
 
+    grid_resolution = 128
     nerf_weights_file_name = 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth'
     compressed_grid_file_name = 'grid.pth.gz'
-    grid_file_name = 'grid_128.pth'
+    grid_file_name = f'grid_{grid_resolution}].pth'
 
     generated_grids = 0
     N_GRIDS_LOG = 100
@@ -70,7 +73,6 @@ def start_grids_generation(nerf_root):
     device = 'cuda:0'
     radiance_field = NGPradianceField(**config.INSTANT_NGP_MLP_CONF).to(device)
     
-
     start_time = time.time()
 
     to_skip = []
@@ -88,9 +90,6 @@ def start_grids_generation(nerf_root):
             subject_dir = os.path.join(subject_dirs, subject_name)
             weights_dir = os.path.join(subject_dir, nerf_weights_file_name)
 
-            # print(f'Generating grid: {subject_dir}')
-
-            grid_compressed_dir = os.path.join(subject_dir, compressed_grid_file_name)
             grid_dir =  os.path.join(subject_dir, grid_file_name)
             if os.path.exists(grid_dir):
                 print('ALREADY EXISTS!')
@@ -107,44 +106,24 @@ def start_grids_generation(nerf_root):
                     aabb=config.GRID_AABB,
                     n_iterations=config.GRID_RECONSTRUCTION_TOTAL_ITERATIONS,
                     n_warmups=config.GRID_RECONSTRUCTION_WARMUP_ITERATIONS,
-                    radiance_field=radiance_field
+                    radiance_field=radiance_field,
+                    grid_resolution=grid_resolution
                 )
 
                 dict = {
-                    # 'occs': grid.state_dict()['occs'].half(),
+                    # 'occs': grid.state_dict()['occs'].half(), # do not save this, because it is not required from the ray marching algorithm
                     '_roi_aabb': grid.state_dict()['_roi_aabb'].half(),
                     '_binary': grid.state_dict()['_binary'].to_sparse(),
                     'resolution': grid.state_dict()['resolution'].half()
                 }
                 torch.save(dict, grid_dir)
 
-                """
-                with gzip.open(grid_compressed_dir, 'wb') as f:
-                    torch.save(dict, f)
-                """
-                
-                """
-                # Uncompressed dictionary
-                dict = {
-                    'occs': grid.state_dict()['occs'],
-                    '_roi_aabb': grid.state_dict()['_roi_aabb'],
-                    '_binary': grid.state_dict()['_binary'],
-                    'resolution': grid.state_dict()['resolution']
-                }
-                """
-
-                """
-                # Uncompressed file
-                grid_dir = os.path.join(subject_dir, grid_file_name)
-                torch.save(dict, grid_dir)
-                """
-                
                 generated_grids += 1
 
                 if generated_grids > 0 and generated_grids % N_GRIDS_LOG == 0:
                     end_time = time.time()
                     print(f'Generated {generated_grids} grids in {end_time - start_time:.2f}s')
-                    # start_time = time.time()
+
                     
 
                 
