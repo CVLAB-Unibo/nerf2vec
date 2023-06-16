@@ -1,3 +1,4 @@
+# TODO: rename this module in config_nerf2vec.py, and update all the references to it.
 """
 # ####################
 # NERF2VEC

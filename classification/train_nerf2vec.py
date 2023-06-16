@@ -72,8 +72,6 @@ class NeRFDataset(Dataset):
         matrix_unflattened = torch.load(nerf_loader.weights_file_path, map_location=torch.device(self.device))
         matrix_flattened = get_mlp_params_as_matrix(matrix_unflattened['mlp_base.params'])
 
-        # TODO: 
-        # - test also without the "_128" (grids with slightly smaller resolution)
         grid_weights_path = os.path.join(data_dir, 'grid.pth')  
         grid_weights = torch.load(grid_weights_path, map_location=self.device)
         grid_weights['_binary'] = grid_weights['_binary'].to_dense()
@@ -95,7 +93,7 @@ class Nerf2vecTrainer:
             batch_size=config.BATCH_SIZE,
             shuffle=True,
             num_workers=8, 
-            persistent_workers=False,  # TODO: check this
+            persistent_workers=False, 
             prefetch_factor=2,
             #pin_memory=True
         )

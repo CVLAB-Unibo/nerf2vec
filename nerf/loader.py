@@ -1,7 +1,3 @@
-"""
-TODO: before delivery decide whether to remove the Dataset class from  NeRFLoader. 
-This because, at the moment, it's not useful. However, this reflects the NerfAcc implementation of this class.
-"""
 import json
 import os
 

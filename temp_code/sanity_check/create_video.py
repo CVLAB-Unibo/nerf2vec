@@ -53,7 +53,7 @@ def pose_spherical(theta, phi, t):
     c2w = get_rotation_phi(phi / 180.0 * np.pi) @ c2w
     c2w = get_rotation_theta(theta / 180.0 * np.pi) @ c2w
     c2w = torch.from_numpy(np.array([[-1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [
-                           0, 0, 0, 1]], dtype=np.float32)) @ c2w  # TODO: check if PyTorch can handle this
+                           0, 0, 0, 1]], dtype=np.float32)) @ c2w  
     return c2w
 
 
