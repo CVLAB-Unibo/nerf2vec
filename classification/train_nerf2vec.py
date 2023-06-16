@@ -242,7 +242,7 @@ class Nerf2vecTrainer:
                 # compute loss
                 loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
                 self.optimizer.zero_grad()
-                # do not unscale it because we are using Adam.
+                # do not unscale 
                 self.grad_scaler.scale(loss).backward()
                 self.optimizer.step()
 

@@ -18,7 +18,7 @@ LABELS_TO_IDS = {
     "04530566": 14   # watercraft
 }
 
-EMBEDDINGS_PATH = os.path.join('classification', 'embeddings')
+EMBEDDINGS_DIR = os.path.join('classification', 'embeddings')
 TRAIN_SPLIT = 'train'
 VAL_SPLIT = 'val'
 TEST_SPLIT = 'test'

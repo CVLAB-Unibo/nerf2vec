@@ -92,7 +92,7 @@ def export_embeddings():
             with torch.no_grad():
                 embeddings = encoder(matrices)
 
-            out_root = Path(config.CLASSIFIER_EMBEDDINGS_PATH)
+            out_root = Path(config.EMBEDDINGS_DIR)
             h5_path = out_root / Path(f"{split}") / f"{idx}.h5"
             h5_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -48,7 +48,7 @@ class InrEmbeddingDataset(Dataset):
     class InrEmbeddingClassifier:
         def __init__(self, device='cuda:0') -> None:
 
-            dset_root = Path(config.EMBEDDINGS_PATH)
+            dset_root = Path(config.EMBEDDINGS_DIR)
             train_dset = InrEmbeddingDataset(dset_root, config.TRAIN_SPLIT)
 
             train_bs = config.TRAIN_BS

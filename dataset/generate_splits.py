@@ -10,8 +10,6 @@ def cycle_path(nerfs_root):
 
     dict_result = {}
 
-    # base_folder = os.path.join('.', os.path.basename(os.path.normpath(nerfs_root)))
-    # last_two_parts = os.path.join(*os.path.split(nerfs_root)[-2:])
     last_two_parts = os.path.join(*os.path.splitdrive(nerfs_root)[1].split(os.sep)[-2:])
     base_folder = os.path.join('.', last_two_parts)
 
@@ -93,6 +91,7 @@ def create():
 
     
     base_path = 'dataset'
+    
     with open(os.path.join(base_path, 'train.json'), 'w') as file:
         json.dump(train, file)
     with open(os.path.join(base_path, 'validation.json'), 'w') as file:
@@ -100,8 +99,8 @@ def create():
     with open(os.path.join(base_path, 'test.json'), 'w') as file:
         json.dump(test, file)
     
-
     """
+    # Generate a subset (only for testing purpose)
     with open(os.path.join(base_path, 'train.json'), 'w') as file:
         json.dump(random.sample(train, 2000), file)
     with open(os.path.join(base_path, 'validation.json'), 'w') as file:
