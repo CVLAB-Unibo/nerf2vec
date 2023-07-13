@@ -29,7 +29,7 @@ class InrDataset(Dataset):
         self.nerf_weights_file_name = nerf_weights_file_name
 
     def __len__(self) -> int:
-        return len(self.mlps_paths)
+        return len(self.nerf_paths)
 
     def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor]:
 
@@ -97,8 +97,12 @@ def export_embeddings():
             h5_path.parent.mkdir(parents=True, exist_ok=True)
 
             with h5py.File(h5_path, "w") as f:
-                f.create_dataset("data_dir", data=data_dirs[0].detach().cpu().numpy())
+                # print(f'dir: {data_dirs[0]}, class: {class_ids[0]}')
+                f.create_dataset("data_dir", data=data_dirs[0])
                 f.create_dataset("embedding", data=embeddings[0].detach().cpu().numpy())
                 f.create_dataset("class_id", data=class_ids[0].detach().cpu().numpy())
 
             idx += 1
+
+            if idx % 5000 == 0:
+                print(f'Created {idx} embeddings for {split} split')

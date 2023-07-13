@@ -33,3 +33,10 @@ WD = 1e-2
 NUM_EPOCHS = 150
 
 OUTPUT_DIR = os.path.join('classification', 'classifier')
+
+
+# TODO: take these values from the inr2vec configuration file
+ENCODER_EMBEDDING_DIM = 1024
+ENCODER_HIDDEN_DIM = [256, 256, 512, 512]
+NERF_WEIGHTS_FILE_NAME = 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth'
+MLP_UNITS = 64

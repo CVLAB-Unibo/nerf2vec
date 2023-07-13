@@ -75,7 +75,7 @@ def get_grid_file_name(file_path):
 
 def get_class_label(file_path):
     directories = os.path.normpath(file_path).split(os.sep)
-    class_label = directories[-2]
+    class_label = directories[-3]
     
     return class_label
 
