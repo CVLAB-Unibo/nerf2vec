@@ -23,6 +23,8 @@ from classification import config
 from nerf.loader_gt import NeRFLoaderGT
 from nerf.utils import Rays, render_image, render_image_GT
 
+from torch.cuda.amp import autocast
+
 import wandb
 
 class NeRFDataset(Dataset):
@@ -158,11 +160,12 @@ class Nerf2vecTrainer:
         params = list(self.encoder.parameters())
         params.extend(self.decoder.parameters())
         self.optimizer = AdamW(params, lr, weight_decay=wd)
+        # self.optimizer = AdamW(params, lr, weight_decay=wd, eps=1e-15)
         self.grad_scaler = torch.cuda.amp.GradScaler(2**10)
         
         self.epoch = 0
         self.global_step = 0
-        self.best_psnr = float("inf")
+        self.best_psnr = float(0)  # float("inf")
 
         self.ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
         self.all_ckpts_path = Path(os.path.join('classification', 'train', 'all_ckpts'))
@@ -198,6 +201,7 @@ class Nerf2vecTrainer:
                 # print(f'Batch {batch_idx} started...')
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
                 train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir = batch
+                # print(data_dir)
                 rays = train_nerf['rays']
                 color_bkgds = train_nerf['color_bkgd']
 
@@ -205,40 +209,43 @@ class Nerf2vecTrainer:
                 color_bkgds = color_bkgds.cuda()
                 matrices_flattened = matrices_flattened.cuda()
 
-                pixels = render_image_GT(
-                        radiance_field=self.ngp_mlp, 
-                        occupancy_grid=self.occupancy_grid, 
-                        rays=rays, 
-                        scene_aabb=self.scene_aabb, 
+                # Enable autocast for mixed precision
+                with autocast():
+                    pixels = render_image_GT(
+                            radiance_field=self.ngp_mlp, 
+                            occupancy_grid=self.occupancy_grid, 
+                            rays=rays, 
+                            scene_aabb=self.scene_aabb, 
+                            render_step_size=self.render_step_size,
+                            color_bkgds=color_bkgds,
+                            grid_weights=grid_weights,
+                            ngp_mlp_weights=matrices_unflattened,
+                            ngp_mlp=self.ngp_mlp,
+                            device=self.device)
+
+                    embeddings = self.encoder(matrices_flattened)
+                    
+                    rgb, acc, _, n_rendering_samples = render_image(
+                        self.decoder,
+                        embeddings,
+                        self.occupancy_grid,
+                        rays,
+                        self.scene_aabb,
                         render_step_size=self.render_step_size,
-                        color_bkgds=color_bkgds,
-                        grid_weights=grid_weights,
-                        ngp_mlp_weights=matrices_unflattened,
-                        ngp_mlp=self.ngp_mlp,
-                        device=self.device)
+                        render_bkgd=color_bkgds,
+                        grid_weights=grid_weights
+                    )
 
-                embeddings = self.encoder(matrices_flattened)
+                    # TODO: evaluate whether to add this condition or not
+                    if 0 in n_rendering_samples:
+                        print(f'0 n_rendering_samples. Skip iteration.')
+                        continue
+
+                    alive_ray_mask = acc.squeeze(-1) > 0
+
+                    # compute loss
+                    loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
                 
-                rgb, acc, _, n_rendering_samples = render_image(
-                    self.decoder,
-                    embeddings,
-                    self.occupancy_grid,
-                    rays,
-                    self.scene_aabb,
-                    render_step_size=self.render_step_size,
-                    render_bkgd=color_bkgds,
-                    grid_weights=grid_weights
-                )
-
-                # TODO: evaluate whether to add this condition or not
-                if 0 in n_rendering_samples:
-                    print(f'0 n_rendering_samples. Skip iteration.')
-                    continue
-
-                alive_ray_mask = acc.squeeze(-1) > 0
-
-                # compute loss
-                loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
                 self.optimizer.zero_grad()
                 # do not unscale 
                 self.grad_scaler.scale(loss).backward()
@@ -292,38 +299,39 @@ class Nerf2vecTrainer:
             rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
             color_bkgds = color_bkgds.cuda()
             matrices_flattened = matrices_flattened.cuda()
+            with autocast():
+                pixels = render_image_GT(
+                            radiance_field=self.ngp_mlp, 
+                            occupancy_grid=self.occupancy_grid, 
+                            rays=rays, 
+                            scene_aabb=self.scene_aabb, 
+                            render_step_size=self.render_step_size,
+                            color_bkgds=color_bkgds,
+                            grid_weights=grid_weights,
+                            ngp_mlp_weights=matrices_unflattened,
+                            ngp_mlp=self.ngp_mlp,
+                            device=self.device)
+                
+                embeddings = self.encoder(matrices_flattened)
+                
+                rgb, _, _, n_rendering_samples = render_image(
+                    self.decoder,
+                    embeddings,
+                    self.occupancy_grid,
+                    rays,
+                    self.scene_aabb,
+                    render_step_size=self.render_step_size,
+                    render_bkgd=color_bkgds,
+                    grid_weights=grid_weights
+                )
 
-            pixels = render_image_GT(
-                        radiance_field=self.ngp_mlp, 
-                        occupancy_grid=self.occupancy_grid, 
-                        rays=rays, 
-                        scene_aabb=self.scene_aabb, 
-                        render_step_size=self.render_step_size,
-                        color_bkgds=color_bkgds,
-                        grid_weights=grid_weights,
-                        ngp_mlp_weights=matrices_unflattened,
-                        ngp_mlp=self.ngp_mlp,
-                        device=self.device)
+                # TODO: evaluate whether to add this condition or not
+                if 0 in n_rendering_samples:
+                    self.logfn({'ERROR': '0 n_rendering_samples. Skip iteration.'})
+                    continue
+                
+                mse = F.mse_loss(rgb, pixels)
             
-            embeddings = self.encoder(matrices_flattened)
-            
-            rgb, _, _, n_rendering_samples = render_image(
-                self.decoder,
-                embeddings,
-                self.occupancy_grid,
-                rays,
-                self.scene_aabb,
-                render_step_size=self.render_step_size,
-                render_bkgd=color_bkgds,
-                grid_weights=grid_weights
-            )
-
-            # TODO: evaluate whether to add this condition or not
-            if 0 in n_rendering_samples:
-                self.logfn({'ERROR': '0 n_rendering_samples. Skip iteration.'})
-                continue
-            
-            mse = F.mse_loss(rgb, pixels)
             psnr = -10.0 * torch.log(mse) / np.log(10.0)
             psnrs.append(psnr.item())
 
@@ -359,46 +367,47 @@ class Nerf2vecTrainer:
 
         color_bkgds = color_bkgds.cuda()
         matrices_flattened = matrices_flattened.cuda()
+        
+        with autocast():
+            pixels = render_image_GT(
+                            radiance_field=self.ngp_mlp, 
+                            occupancy_grid=self.occupancy_grid, 
+                            rays=rays, 
+                            scene_aabb=self.scene_aabb, 
+                            render_step_size=self.render_step_size,
+                            color_bkgds=color_bkgds,
+                            grid_weights=grid_weights,
+                            ngp_mlp_weights=matrices_unflattened,
+                            ngp_mlp=self.ngp_mlp,
+                            device=self.device,
+                            training=False)
+        
+            embeddings = self.encoder(matrices_flattened)
 
-        pixels = render_image_GT(
-                        radiance_field=self.ngp_mlp, 
-                        occupancy_grid=self.occupancy_grid, 
-                        rays=rays, 
-                        scene_aabb=self.scene_aabb, 
-                        render_step_size=self.render_step_size,
-                        color_bkgds=color_bkgds,
-                        grid_weights=grid_weights,
-                        ngp_mlp_weights=matrices_unflattened,
-                        ngp_mlp=self.ngp_mlp,
-                        device=self.device,
-                        training=False)
-    
-        embeddings = self.encoder(matrices_flattened)
+            for idx in range(len(matrices_flattened)):
+                
+                curr_grid_weights = {
+                    '_roi_aabb': [grid_weights['_roi_aabb'][idx]],
+                    '_binary': [grid_weights['_binary'][idx]],
+                    'resolution': [grid_weights['resolution'][idx]],
+                    'occs': [grid_weights['occs'][idx]],
+                }
+        
+                rgb, _, _, _ = render_image(
+                    radiance_field=self.decoder,
+                    embeddings=embeddings[idx].unsqueeze(dim=0),
+                    occupancy_grid=self.occupancy_grid,
+                    rays=Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
+                    scene_aabb=self.scene_aabb,
+                    render_step_size=self.render_step_size,
+                    render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
+                    grid_weights=curr_grid_weights
+                )
 
-        for idx in range(len(matrices_flattened)):
-            
-            curr_grid_weights = {
-                '_roi_aabb': [grid_weights['_roi_aabb'][idx]],
-                '_binary': [grid_weights['_binary'][idx]],
-                'resolution': [grid_weights['resolution'][idx]],
-                'occs': [grid_weights['occs'][idx]],
-            }
-       
-            rgb, _, _, _ = render_image(
-                radiance_field=self.decoder,
-                embeddings=embeddings[idx].unsqueeze(dim=0),
-                occupancy_grid=self.occupancy_grid,
-                rays=Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
-                scene_aabb=self.scene_aabb,
-                render_step_size=self.render_step_size,
-                render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
-                grid_weights=curr_grid_weights
-            )
+                pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
+                gt_image = wandb.Image((pixels.to('cpu').detach().numpy()[idx] * 255).astype(np.uint8))
 
-            pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
-            gt_image = wandb.Image((pixels.to('cpu').detach().numpy()[idx] * 255).astype(np.uint8))
-
-            self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image]})
+                self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image]})
         
 
             """

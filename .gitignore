@@ -5,6 +5,7 @@ sanity_check/videos
 
 classification/train
 classification/plots
+classification/embeddings
 
 wandb/
 
@@ -12,3 +13,8 @@ data/data_DISCARDED
 data/data_TRAINED
 data/data_TRAINED_A1
 data/data_TRAINED_A2
+
+train_*
+DO_NOT*
+
+

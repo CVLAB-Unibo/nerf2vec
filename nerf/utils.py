@@ -1,4 +1,5 @@
 import random
+import time
 from typing import Optional
 
 import numpy as np
@@ -68,6 +69,10 @@ def render_image(
         else 4096
     )
     
+    MAX_SIZE = 20000  # Desired maximum size  # TODO: add a configuration variable
+    
+    # new_indices = torch.zeros(MAX_SIZE, dtype=torch.int32, device='cpu')
+
     for i in range(0, num_rays, chunk):
         chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)
 
@@ -121,13 +126,16 @@ def render_image(
                 t_dirs = chunk_rays.viewdirs[batch_idx][ray_indices]
                 positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
                 b_positions.append(positions)
-                        
 
-            MAX_SIZE = 35000  # Desired maximum size  # TODO: add a configuration variable
+            
+            # l = []
             padding_masks = [None]*batch_size
-            if radiance_field.training or batch_size > 1:
-                for batch_idx in range(batch_size):
 
+            
+            if radiance_field.training or batch_size > 1:
+
+                for batch_idx in range(batch_size):
+                    # l.append(b_positions[batch_idx].size(0))
                     # PADDING
                     if b_positions[batch_idx].size(0) < MAX_SIZE:
 
@@ -151,11 +159,84 @@ def render_image(
 
                     # TRUNCATION
                     else:
+                        # ################################################################################
+                        # NEW WAY
+                        # ################################################################################                        
+                        """
+                        RATIO = MAX_SIZE/b_positions[batch_idx].size(0)
 
+                        values, counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
+                        
+                        new_counts = (counts.float() * RATIO).clamp(min=1).floor().long()
+                        new_total = new_counts.sum().item()
+
+                        remaining_values = MAX_SIZE-new_total
+
+                        mask = counts[counts >= new_counts+1][:remaining_values]
+                        true_indices = torch.nonzero(mask).flatten()
+                        
+                        if new_counts.shape[0] < max(true_indices):
+                            print(max(true_indices), new_counts.shape)
+                        new_counts[mask] += 1
+                        
+                        
+                        current_old_position = 0
+                        current_new_position = 0
+                        
+                        # for old, new in zip(counts, new_counts):
+                        for idx in range(len(counts)):
+                            old = counts[idx]
+                            new = new_counts[idx]
+                            
+                            # random_numbers = random.sample(range(current_old_position, current_old_position+old), new)
+                            # random_numbers.sort()
+                            # print(old)
+                            random_numbers = torch.randperm(old.item(), device='cuda')
+                            
+                            random_numbers = random_numbers[:new] + current_old_position
+                            random_numbers = torch.sort(random_numbers)[0]
+                            
+                            new_indices[current_new_position:current_new_position+new] = random_numbers
+                            current_old_position += old
+                            current_new_position += new
+                        
+                        b_positions[batch_idx] = b_positions[batch_idx][new_indices]
+                        b_t_starts[batch_idx] = b_t_starts[batch_idx][new_indices]
+                        b_t_ends[batch_idx] = b_t_ends[batch_idx][new_indices]
+                        b_ray_indices[batch_idx] = b_ray_indices[batch_idx][new_indices]
+                        
+                        
+
+                        # new_values, new_counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
+                        # assert torch.eq(values, new_values).all().item(), "ERROR"
+                        """
+                        
+                        # ################################################################################
+                        # OLD WAY
+                        # ################################################################################
+                        """
                         b_positions[batch_idx] = b_positions[batch_idx][:MAX_SIZE]
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][:MAX_SIZE]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][:MAX_SIZE]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][:MAX_SIZE]
+                        """
+                        
+                        # ################################################################################
+
+                        # ################################################################################
+                        # RANDOM WAY
+                        # ################################################################################
+                        
+                        n_elements = b_positions[batch_idx].shape[0]
+                        indices = torch.randperm(n_elements, device='cuda')[:MAX_SIZE]
+                        indices, _ = torch.sort(indices)  # This is important to avoid problem with volume rendering
+                        b_positions[batch_idx] = b_positions[batch_idx][indices]
+                        b_t_starts[batch_idx] = b_t_starts[batch_idx][indices]
+                        b_t_ends[batch_idx] = b_t_ends[batch_idx][indices]
+                        b_ray_indices[batch_idx] = b_ray_indices[batch_idx][indices]
+                        
+                # print(min(l), max(l))
+            
             
             # Convert arrays in tensors        
             b_t_starts = torch.stack(b_t_starts, dim=0)
