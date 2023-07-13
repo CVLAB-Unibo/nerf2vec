@@ -341,3 +341,71 @@ def _get_nerf_paths(self, nerfs_root: str):
     
     return nerf_paths
 """
+
+
+
+"""
+# ################################################################################
+# NEW WAY
+# ################################################################################
+                        
+RATIO = MAX_SIZE/b_positions[batch_idx].size(0)
+
+values, counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
+
+'''
+new_total = 0
+new_counts = []
+for count in counts:
+    new_val = int(count*RATIO)
+    if new_val == 0:
+        new_val = 1
+    # new_counts.append(new_val)
+    new_total += new_val
+'''
+
+new_counts = (counts.float() * RATIO).clamp(min=1).floor().long()
+new_total = new_counts.sum().item()
+
+remaining_values = MAX_SIZE-new_total
+
+mask = counts[counts > new_counts+1][:remaining_values]
+new_counts[mask] += 1
+
+'''
+while remaining_values > 0:
+    random_indices = random.sample(range(0, len(counts)), k=remaining_values)
+    for idx in random_indices:
+        if counts[idx] >= new_counts[idx] + 1: 
+            new_counts[idx] += 1
+            remaining_values -= 1
+'''
+
+new_indices = torch.zeros(MAX_SIZE, dtype=torch.int32, device='cuda')
+current_old_position = 0
+current_new_position = 0
+
+# for old, new in zip(counts, new_counts):
+
+for idx in range(len(counts)):
+    old = counts[idx]
+    new = new_counts[idx]
+    
+    # random_numbers = random.sample(range(current_old_position, current_old_position+old), new)
+    # random_numbers.sort()
+    random_numbers = torch.randperm(old)[:new] + current_old_position
+    random_numbers = torch.sort(random_numbers)[0]
+    
+    new_indices[current_new_position:current_new_position+new] = random_numbers
+    current_old_position += old
+    current_new_position += new
+
+b_positions[batch_idx] = b_positions[batch_idx][new_indices]
+b_t_starts[batch_idx] = b_t_starts[batch_idx][new_indices]
+b_t_ends[batch_idx] = b_t_ends[batch_idx][new_indices]
+b_ray_indices[batch_idx] = b_ray_indices[batch_idx][new_indices]
+
+
+# new_values, new_counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
+# assert torch.eq(values, new_values).all().item(), "ERROR"
+"""
