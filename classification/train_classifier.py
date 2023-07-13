@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import h5py
+import datetime
 
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -85,6 +86,9 @@ class InrEmbeddingDataset(Dataset):
             wandb.log(values, step=self.global_step, commit=False)
 
         def train(self) -> None:
+            
+            self.config_wandb()
+
             num_epochs = config.NUM_EPOCHS
             start_epoch = self.epoch
 
@@ -216,3 +220,11 @@ class InrEmbeddingDataset(Dataset):
                 self.net.load_state_dict(ckpt["net"])
                 self.optimizer.load_state_dict(ckpt["optimizer"])
                 self.scheduler.load_state_dict(ckpt["scheduler"])
+        
+        def config_wandb(self):
+            wandb.init(
+                entity='dsr-lab',
+                project='nerf2vec_classifier',
+                name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
+                config=config.WANDB_CONFIG
+            )

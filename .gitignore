@@ -17,4 +17,8 @@ data/data_TRAINED_A2
 train_*
 DO_NOT*
 
+data/*_train.json
+data/*_validation.json
+data/*_test.json
+
 
