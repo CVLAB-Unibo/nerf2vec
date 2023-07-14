@@ -3,7 +3,7 @@ __pycache__/
 sanity_check/images
 sanity_check/videos
 
-classification/train
+# classification/train
 classification/plots
 classification/embeddings
 

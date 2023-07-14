@@ -3,10 +3,16 @@ import sys
 
 from classification.train_nerf2vec import Nerf2vecTrainer
 from dataset.generate_grids import start_grids_generation
+from classification.export_embeddings import export_embeddings
+from classification.train_classifier import InrEmbeddingClassifier
 
 def train_nerf2vec():
     nerf2vec = Nerf2vecTrainer()
     nerf2vec.train()
+
+def train_classifier():
+    classifier = InrEmbeddingClassifier()
+    classifier.train()
 
 def generate_grids():
 
@@ -19,7 +25,7 @@ def generate_grids():
     for nerf_root in nerf_roots:
         start_grids_generation(nerf_root)
 
-
+        
 if __name__ == '__main__':
     
     # TODO: uncomment this as soon as the training is complete (must be tested)
@@ -37,3 +43,5 @@ if __name__ == '__main__':
 
     train_nerf2vec()
     # generate_grids()
+    # export_embeddings()
+    # train_classifier()
