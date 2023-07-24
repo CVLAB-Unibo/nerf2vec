@@ -21,7 +21,7 @@ data/*_train.json
 data/*_validation.json
 data/*_test.json
 
-classification/classifier
+classification/classifier/*
 classification/classifier*
 classification/embeddings
 classification/embeddings*
