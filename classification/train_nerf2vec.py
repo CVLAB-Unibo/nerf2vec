@@ -241,10 +241,9 @@ class Nerf2vecTrainer:
                         print(f'0 n_rendering_samples. Skip iteration.')
                         continue
 
-                    alive_ray_mask = acc.squeeze(-1) > 0
-
-                    # compute loss
-                    loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
+                    # alive_ray_mask = acc.squeeze(-1) > 0
+                    # loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
+                    loss = F.smooth_l1_loss(rgb, pixels)
                 
                 self.optimizer.zero_grad()
                 # do not unscale 
@@ -314,7 +313,7 @@ class Nerf2vecTrainer:
                 
                 embeddings = self.encoder(matrices_flattened)
                 
-                rgb, _, _, n_rendering_samples = render_image(
+                rgb, acc, _, n_rendering_samples = render_image(
                     self.decoder,
                     embeddings,
                     self.occupancy_grid,
@@ -329,8 +328,9 @@ class Nerf2vecTrainer:
                 if 0 in n_rendering_samples:
                     self.logfn({'ERROR': '0 n_rendering_samples. Skip iteration.'})
                     continue
-                
-                mse = F.mse_loss(rgb, pixels)
+                alive_ray_mask = acc.squeeze(-1) > 0
+                mse = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
+                # mse = F.mse_loss(rgb, pixels)
             
             psnr = -10.0 * torch.log(mse) / np.log(10.0)
             psnrs.append(psnr.item())

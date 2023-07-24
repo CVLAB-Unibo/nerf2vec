@@ -43,7 +43,7 @@ class InrDataset(Dataset):
         return matrix, class_id, data_dir
 
 def load_nerf2vec_checkpoint():
-    ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
+    ckpts_path = Path(os.path.join('classification', 'DO_NOT_DELETE_train_1', 'ckpts'))
     ckpt_paths = [p for p in ckpts_path.glob("*.pt") if "best" not in p.name]
     error_msg = "Expected only one ckpt apart from best, found none or too many."
     assert len(ckpt_paths) == 1, error_msg
@@ -82,6 +82,9 @@ def export_embeddings():
     loaders = [train_loader, val_loader, test_loader]
     splits = [config.TRAIN_SPLIT, config.VAL_SPLIT, config.TEST_SPLIT]
 
+    # invalid_classes = ['02992529', '03948459']
+    invalid_classes = [4, 9]
+
     for loader, split in zip(loaders, splits):
         idx = 0
 
@@ -91,6 +94,9 @@ def export_embeddings():
 
             with torch.no_grad():
                 embeddings = encoder(matrices)
+            
+            if class_ids[0] in invalid_classes:
+                continue
 
             out_root = Path(config.EMBEDDINGS_DIR)
             h5_path = out_root / Path(f"{split}") / f"{idx}.h5"

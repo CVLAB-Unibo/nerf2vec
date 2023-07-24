@@ -70,8 +70,6 @@ def render_image(
     )
     
     MAX_SIZE = 20000  # Desired maximum size  # TODO: add a configuration variable
-    
-    # new_indices = torch.zeros(MAX_SIZE, dtype=torch.int32, device='cpu')
 
     for i in range(0, num_rays, chunk):
         chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)
@@ -133,12 +131,15 @@ def render_image(
 
             
             if radiance_field.training or batch_size > 1:
+                
+                # stacked_tensor = torch.stack(b_positions, dim=0)
+                # MAX_SIZE, _ = torch.max(stacked_tensor, dim=0) 
 
                 for batch_idx in range(batch_size):
                     # l.append(b_positions[batch_idx].size(0))
                     # PADDING
                     if b_positions[batch_idx].size(0) < MAX_SIZE:
-
+                        
                         # Define padding dimensions                        
                         initial_size = b_positions[batch_idx].size(0)
                         padding_size = MAX_SIZE - initial_size
@@ -161,8 +162,9 @@ def render_image(
                     else:
                         # ################################################################################
                         # NEW WAY
-                        # ################################################################################                        
-                        """
+                        # ################################################################################       
+                        """                 
+                        new_indices = torch.zeros(MAX_SIZE, dtype=torch.int32, device='cuda')
                         RATIO = MAX_SIZE/b_positions[batch_idx].size(0)
 
                         values, counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
@@ -214,19 +216,42 @@ def render_image(
                         # ################################################################################
                         # OLD WAY
                         # ################################################################################
-                        """
                         b_positions[batch_idx] = b_positions[batch_idx][:MAX_SIZE]
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][:MAX_SIZE]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][:MAX_SIZE]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][:MAX_SIZE]
+                        
+
+
+                        # ################################################################################
+                        # FREQUENCY ORDER
+                        # ################################################################################
+                        # new_positions, new_indices = torch.sort(b_ray_indices[batch_idx], descending=True, stable=True)
+                        # new_indices = new_indices[:MAX_SIZE]
+
                         """
+                        # Calculate the frequency of each value
+                        values, counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
+                        sorted_indices = torch.argsort(counts, descending=True)
+                        indices_tensor = torch.arange(len(b_ray_indices[batch_idx]), device='cuda')
+                        
+                        new_indices = torch.cat([indices_tensor[b_ray_indices[batch_idx] == values[idx]] for idx in sorted_indices])
+                        new_indices = new_indices[:MAX_SIZE]
+                        new_indices, _ = torch.sort(new_indices, descending=False)
+
+                        b_positions[batch_idx] = b_positions[batch_idx][new_indices]
+                        b_t_starts[batch_idx] = b_t_starts[batch_idx][new_indices]
+                        b_t_ends[batch_idx] = b_t_ends[batch_idx][new_indices]
+                        b_ray_indices[batch_idx] = b_ray_indices[batch_idx][new_indices]
+                        """
+                        
                         
                         # ################################################################################
 
                         # ################################################################################
                         # RANDOM WAY
                         # ################################################################################
-                        
+                        """
                         n_elements = b_positions[batch_idx].shape[0]
                         indices = torch.randperm(n_elements, device='cuda')[:MAX_SIZE]
                         indices, _ = torch.sort(indices)  # This is important to avoid problem with volume rendering
@@ -234,6 +259,7 @@ def render_image(
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][indices]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][indices]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][indices]
+                        """
                         
                 # print(min(l), max(l))
             
@@ -405,10 +431,19 @@ def render_image_GT(
             )
             chunk_results = [rgb, opacity, depth, len(t_starts)]
             results.append(chunk_results)
-        colors, _, _, _ = [
+        colors, opacities, _, _ = [
             torch.cat(r, dim=0) if isinstance(r[0], torch.Tensor) else r
             for r in zip(*results)
         ]
+        
+
+        """
+        print(f'{len(opacities[opacities > 0])}/{len(opacities)}')
+        if len(opacities[opacities > 0]) < 200:
+            print()
+        """
+
+
 
         pixels[batch_idx] = colors.view((*rays_shape[1:-1], -1))
 
