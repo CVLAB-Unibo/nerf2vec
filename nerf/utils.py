@@ -137,6 +137,7 @@ def render_image(
 
                 for batch_idx in range(batch_size):
                     # l.append(b_positions[batch_idx].size(0))
+                    # print(b_positions[batch_idx].size(0))
                     # PADDING
                     if b_positions[batch_idx].size(0) < MAX_SIZE:
                         
@@ -163,7 +164,7 @@ def render_image(
                         # ################################################################################
                         # NEW WAY
                         # ################################################################################       
-                        """                 
+                        """
                         new_indices = torch.zeros(MAX_SIZE, dtype=torch.int32, device='cuda')
                         RATIO = MAX_SIZE/b_positions[batch_idx].size(0)
 
@@ -211,17 +212,17 @@ def render_image(
 
                         # new_values, new_counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
                         # assert torch.eq(values, new_values).all().item(), "ERROR"
-                        """
+                        """                 
                         
                         # ################################################################################
                         # OLD WAY
                         # ################################################################################
+                        """
                         b_positions[batch_idx] = b_positions[batch_idx][:MAX_SIZE]
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][:MAX_SIZE]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][:MAX_SIZE]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][:MAX_SIZE]
-                        
-
+                        """
 
                         # ################################################################################
                         # FREQUENCY ORDER
@@ -251,7 +252,7 @@ def render_image(
                         # ################################################################################
                         # RANDOM WAY
                         # ################################################################################
-                        """
+                        
                         n_elements = b_positions[batch_idx].shape[0]
                         indices = torch.randperm(n_elements, device='cuda')[:MAX_SIZE]
                         indices, _ = torch.sort(indices)  # This is important to avoid problem with volume rendering
@@ -259,7 +260,7 @@ def render_image(
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][indices]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][indices]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][indices]
-                        """
+                        
                         
                 # print(min(l), max(l))
             
@@ -336,19 +337,34 @@ def render_image_GT(
     ngp_mlp_weights= None,
     ngp_mlp=None,
     device='cuda:0',
-    training=True
+    training=True,
+    max_elements=1024
 ):
+    
+    filtered_rays = rays
+
     rays_shape = rays.origins.shape
-    if len(rays_shape) == 4:
+    is_rendering_full_image = True if len(rays_shape) == 4 else False
+    
+    if is_rendering_full_image:
         batch_size, height, width, _ = rays_shape
         num_rays = height * width
         rays = namedtuple_map(
             lambda r: r.reshape([batch_size] + [num_rays] + list(r.shape[3:])), rays
         )
         pixels = torch.empty((batch_size, height, width, 3), device=device)
+
     else:
         batch_size, num_rays, _ = rays_shape
-        pixels = torch.empty((batch_size, num_rays, 3), device=device)
+        # pixels = torch.empty((batch_size, num_rays, 3), device=device)
+        
+        pixels = torch.empty((batch_size, max_elements, 3), device=device)
+        rays_shape = torch.Size((batch_size, max_elements, rays_shape[-1]))
+        filtered_rays = Rays(
+            origins=torch.empty((batch_size, max_elements, 3), device=device), 
+            viewdirs=torch.empty((batch_size, max_elements, 3), device=device)
+        )
+        
 
     def sigma_fn(t_starts, t_ends, ray_indices):
         t_origins = chunk_rays.origins[ray_indices]
@@ -436,15 +452,70 @@ def render_image_GT(
             for r in zip(*results)
         ]
         
-
         """
         print(f'{len(opacities[opacities > 0])}/{len(opacities)}')
         if len(opacities[opacities > 0]) < 200:
             print()
         """
-
-
-
+        
+        
+        if not is_rendering_full_image:
+            colors, indices = sample_pixels_uniformly(opacities, colors, max_elements)
+    
+            filtered_rays.origins[batch_idx] = rays.origins[batch_idx][indices]
+            filtered_rays.viewdirs[batch_idx] = rays.viewdirs[batch_idx][indices]
+        
+        
         pixels[batch_idx] = colors.view((*rays_shape[1:-1], -1))
+    
+        
+    return pixels, filtered_rays
 
-    return pixels
+def sample_pixels_uniformly(opacities, colors, max_elements):
+
+    # Get indices of True and False elements, where True means that the specified coordinate 
+    # contains the 3d model, False otherwise.
+    all_indices = torch.tensor(range(len(opacities)), device=opacities.device)
+    true_indices =  torch.nonzero(opacities.squeeze()).squeeze()
+    mask = ~torch.isin(all_indices, true_indices)
+    false_indices = all_indices[mask]
+
+    PERCENTAGE = 50
+    # Define the proportion of True and False elements
+    MAX_ELEMENTS_PER_TYPE = (max_elements * PERCENTAGE) // 100
+
+    # Filter True and False indices based on the desired maximum dimension
+    if len(true_indices) <= MAX_ELEMENTS_PER_TYPE:
+        true_indices_capped = true_indices
+    else:
+        true_indices_capped = true_indices[:MAX_ELEMENTS_PER_TYPE]
+
+    remaining_elements = max_elements - len(true_indices_capped)
+    false_indices_capped = false_indices[:remaining_elements]
+
+
+    # Merge the indices and retrieve the colors/pixels 
+    # merged_indices = torch.sort(torch.cat([true_indices_capped, false_indices_capped]))[0]
+    # merged_indices = torch.cat([true_indices_capped, false_indices_capped])
+    
+    if len(true_indices_capped) != len(false_indices_capped):
+        print('true and false indices have different lengths.')
+
+    if PERCENTAGE != 50 or len(true_indices_capped) != len(false_indices_capped):
+        N = len(true_indices_capped)
+        M = len(false_indices_capped)
+        min_size = min(N, M)
+        # Interleave the elements from both tensors up to the minimum size
+        merged_indices = torch.cat([true_indices_capped[:min_size], false_indices_capped[:min_size]])
+
+        # Handle the remaining elements (if any) from the larger tensor
+        if N > M:
+            merged_indices = torch.cat([merged_indices, true_indices_capped[min_size:]])
+        elif M > N:
+            merged_indices = torch.cat([merged_indices, false_indices_capped[min_size:]])
+    else:
+        merged_indices =  torch.stack([true_indices_capped, false_indices_capped], dim=1).view(-1)
+
+    new_colors = colors[merged_indices]
+
+    return new_colors, merged_indices

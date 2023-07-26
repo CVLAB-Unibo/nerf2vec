@@ -211,7 +211,7 @@ class Nerf2vecTrainer:
 
                 # Enable autocast for mixed precision
                 with autocast():
-                    pixels = render_image_GT(
+                    pixels, filtered_rays = render_image_GT(
                             radiance_field=self.ngp_mlp, 
                             occupancy_grid=self.occupancy_grid, 
                             rays=rays, 
@@ -229,7 +229,7 @@ class Nerf2vecTrainer:
                         self.decoder,
                         embeddings,
                         self.occupancy_grid,
-                        rays,
+                        filtered_rays,
                         self.scene_aabb,
                         render_step_size=self.render_step_size,
                         render_bkgd=color_bkgds,
@@ -241,13 +241,14 @@ class Nerf2vecTrainer:
                         print(f'0 n_rendering_samples. Skip iteration.')
                         continue
 
-                    # alive_ray_mask = acc.squeeze(-1) > 0
-                    # loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
-                    loss = F.smooth_l1_loss(rgb, pixels)
+                    alive_ray_mask = acc.squeeze(-1) > 0
+                    loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
+                    # loss = F.smooth_l1_loss(rgb, pixels)
                 
                 self.optimizer.zero_grad()
                 # do not unscale 
                 self.grad_scaler.scale(loss).backward()
+                # loss.backward()
                 self.optimizer.step()
 
                 if self.global_step % 10 == 0:
@@ -256,7 +257,7 @@ class Nerf2vecTrainer:
                 self.global_step += 1
 
                 batch_end = time.time()
-                if batch_idx % 50 == 0:
+                if batch_idx % 1000 == 0:
                     print(f'Completed {batch_idx} batches in {batch_end-batch_start}s')
 
             if epoch % 10 == 0 or epoch == num_epochs - 1:
@@ -284,6 +285,7 @@ class Nerf2vecTrainer:
         self.encoder.eval()
         self.decoder.eval()
 
+        # psnrs_masked = []
         psnrs = []
         idx = 0
 
@@ -299,7 +301,7 @@ class Nerf2vecTrainer:
             color_bkgds = color_bkgds.cuda()
             matrices_flattened = matrices_flattened.cuda()
             with autocast():
-                pixels = render_image_GT(
+                pixels, filtered_rays = render_image_GT(
                             radiance_field=self.ngp_mlp, 
                             occupancy_grid=self.occupancy_grid, 
                             rays=rays, 
@@ -317,7 +319,7 @@ class Nerf2vecTrainer:
                     self.decoder,
                     embeddings,
                     self.occupancy_grid,
-                    rays,
+                    filtered_rays,
                     self.scene_aabb,
                     render_step_size=self.render_step_size,
                     render_bkgd=color_bkgds,
@@ -328,20 +330,25 @@ class Nerf2vecTrainer:
                 if 0 in n_rendering_samples:
                     self.logfn({'ERROR': '0 n_rendering_samples. Skip iteration.'})
                     continue
-                alive_ray_mask = acc.squeeze(-1) > 0
-                mse = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
-                # mse = F.mse_loss(rgb, pixels)
+                # alive_ray_mask = acc.squeeze(-1) > 0
+                # mse_masked = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
+                mse = F.mse_loss(rgb, pixels)
             
             psnr = -10.0 * torch.log(mse) / np.log(10.0)
             psnrs.append(psnr.item())
+
+            # psnr_masked = -10.0 * torch.log(mse_masked) / np.log(10.0)
+            #psnrs_masked.append(psnr_masked.item())
 
             if idx > 99:
                 break
             idx+=1
         
         mean_psnr = sum(psnrs) / len(psnrs)
+        # mean_psnr_masked = sum(psnrs_masked) / len(psnrs_masked)
 
         self.logfn({f'{split}/PSNR': mean_psnr})
+        # self.logfn({f'{split}/PSNR_UNMASKED': mean_psnr_unmasked})
         
         if split == "val" and mean_psnr > self.best_psnr:
             self.best_psnr = mean_psnr
@@ -369,7 +376,7 @@ class Nerf2vecTrainer:
         matrices_flattened = matrices_flattened.cuda()
         
         with autocast():
-            pixels = render_image_GT(
+            pixels, _ = render_image_GT(
                             radiance_field=self.ngp_mlp, 
                             occupancy_grid=self.occupancy_grid, 
                             rays=rays, 
