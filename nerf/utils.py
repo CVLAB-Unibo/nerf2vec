@@ -353,12 +353,14 @@ def render_image_GT(
             lambda r: r.reshape([batch_size] + [num_rays] + list(r.shape[3:])), rays
         )
         pixels = torch.empty((batch_size, height, width, 3), device=device)
+        b_opacities = torch.empty((batch_size, height, width, 1), device=device)
 
     else:
         batch_size, num_rays, _ = rays_shape
         # pixels = torch.empty((batch_size, num_rays, 3), device=device)
         
         pixels = torch.empty((batch_size, max_elements, 3), device=device)
+        b_opacities = torch.empty((batch_size, max_elements, 1), device=device)
         rays_shape = torch.Size((batch_size, max_elements, rays_shape[-1]))
         filtered_rays = Rays(
             origins=torch.empty((batch_size, max_elements, 3), device=device), 
@@ -419,7 +421,7 @@ def render_image_GT(
         chunk = (
             torch.iinfo(torch.int32).max
             if training
-            else 4096
+            else 1024
         )
 
         for i in range(0, num_rays, chunk):
@@ -460,16 +462,17 @@ def render_image_GT(
         
         
         if not is_rendering_full_image:
-            colors, indices = sample_pixels_uniformly(opacities, colors, max_elements)
+            colors, opacities, indices = sample_pixels_uniformly(opacities, colors, max_elements)
     
             filtered_rays.origins[batch_idx] = rays.origins[batch_idx][indices]
             filtered_rays.viewdirs[batch_idx] = rays.viewdirs[batch_idx][indices]
         
         
         pixels[batch_idx] = colors.view((*rays_shape[1:-1], -1))
+        b_opacities[batch_idx] = opacities.view((*rays_shape[1:-1], -1))
     
         
-    return pixels, filtered_rays
+    return pixels, b_opacities, filtered_rays
 
 def sample_pixels_uniformly(opacities, colors, max_elements):
 
@@ -498,8 +501,8 @@ def sample_pixels_uniformly(opacities, colors, max_elements):
     # merged_indices = torch.sort(torch.cat([true_indices_capped, false_indices_capped]))[0]
     # merged_indices = torch.cat([true_indices_capped, false_indices_capped])
     
-    if len(true_indices_capped) != len(false_indices_capped):
-        print('true and false indices have different lengths.')
+    # if len(true_indices_capped) != len(false_indices_capped):
+    #    print('true and false indices have different lengths.')
 
     if PERCENTAGE != 50 or len(true_indices_capped) != len(false_indices_capped):
         N = len(true_indices_capped)
@@ -517,5 +520,6 @@ def sample_pixels_uniformly(opacities, colors, max_elements):
         merged_indices =  torch.stack([true_indices_capped, false_indices_capped], dim=1).view(-1)
 
     new_colors = colors[merged_indices]
+    new_opacities = opacities[merged_indices]
 
-    return new_colors, merged_indices
+    return new_colors, new_opacities, merged_indices
