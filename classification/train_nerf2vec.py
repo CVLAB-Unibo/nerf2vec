@@ -162,6 +162,30 @@ class Nerf2vecTrainer:
         self.optimizer = AdamW(params, lr, weight_decay=wd)
         # self.optimizer = AdamW(params, lr, weight_decay=wd, eps=1e-15)
         self.grad_scaler = torch.cuda.amp.GradScaler(2**10)
+
+        """
+        max_steps = config.NUM_EPOCHS * len(self.train_loader)
+        self.scheduler = torch.optim.lr_scheduler.ChainedScheduler(
+            [
+                torch.optim.lr_scheduler.LinearLR(
+                    self.optimizer, start_factor=0.01, total_iters=20
+                ),
+                torch.optim.lr_scheduler.MultiStepLR(
+                    self.optimizer,
+                    milestones=[
+                        max_steps // 2,
+                        max_steps * 3 // 4,
+                        max_steps * 9 // 10,
+                    ],
+                    gamma=0.33,
+                ),
+            ]
+        )
+        
+        num_steps = config.NUM_EPOCHS * len(self.train_loader)
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, config.LR, total_steps=num_steps)
+        """
+
         
         self.epoch = 0
         self.global_step = 0
@@ -193,7 +217,7 @@ class Nerf2vecTrainer:
             self.encoder.train()
             self.decoder.train()
             
-            print(f'Epoch {epoch} started...')         
+            print(f'Epoch {epoch} started...')          
             epoch_start = time.time()
             batch_start = time.time()
 
@@ -204,6 +228,7 @@ class Nerf2vecTrainer:
                 # print(data_dir)
                 rays = train_nerf['rays']
                 color_bkgds = train_nerf['color_bkgd']
+                color_bkgds = color_bkgds[0].unsqueeze(0).expand(len(matrices_flattened), -1) # TODO: refactor this 
 
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 color_bkgds = color_bkgds.cuda()
@@ -211,7 +236,7 @@ class Nerf2vecTrainer:
 
                 # Enable autocast for mixed precision
                 with autocast():
-                    pixels, filtered_rays = render_image_GT(
+                    pixels, alpha, filtered_rays = render_image_GT(
                             radiance_field=self.ngp_mlp, 
                             occupancy_grid=self.occupancy_grid, 
                             rays=rays, 
@@ -222,6 +247,9 @@ class Nerf2vecTrainer:
                             ngp_mlp_weights=matrices_unflattened,
                             ngp_mlp=self.ngp_mlp,
                             device=self.device)
+                    
+                    # TODO: CHECK ALPHA AND BACKGROUND APPLICATION
+                    pixels = pixels * alpha + color_bkgds.unsqueeze(1) * (1.0 - alpha)
 
                     embeddings = self.encoder(matrices_flattened)
                     
@@ -242,17 +270,21 @@ class Nerf2vecTrainer:
                         continue
 
                     alive_ray_mask = acc.squeeze(-1) > 0
-                    loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
-                    # loss = F.smooth_l1_loss(rgb, pixels)
+                    # loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
+                    loss = F.smooth_l1_loss(rgb, pixels)
+                    
+                    
                 
                 self.optimizer.zero_grad()
                 # do not unscale 
                 self.grad_scaler.scale(loss).backward()
                 # loss.backward()
                 self.optimizer.step()
+                # self.scheduler.step()
 
                 if self.global_step % 10 == 0:
                     self.logfn({"train/loss": loss.item()})
+                    # self.logfn({"train/LR":self.scheduler.get_last_lr()[0]})
                 
                 self.global_step += 1
 
@@ -296,12 +328,13 @@ class Nerf2vecTrainer:
             train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir = batch
             rays = train_nerf['rays']
             color_bkgds = train_nerf['color_bkgd']
+            color_bkgds = color_bkgds[0].unsqueeze(0).expand(len(matrices_flattened), -1) # TODO: refactor this
             
             rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
             color_bkgds = color_bkgds.cuda()
             matrices_flattened = matrices_flattened.cuda()
             with autocast():
-                pixels, filtered_rays = render_image_GT(
+                pixels, alpha, filtered_rays = render_image_GT(
                             radiance_field=self.ngp_mlp, 
                             occupancy_grid=self.occupancy_grid, 
                             rays=rays, 
@@ -312,6 +345,7 @@ class Nerf2vecTrainer:
                             ngp_mlp_weights=matrices_unflattened,
                             ngp_mlp=self.ngp_mlp,
                             device=self.device)
+                pixels = pixels * alpha + color_bkgds.unsqueeze(1) * (1.0 - alpha)
                 
                 embeddings = self.encoder(matrices_flattened)
                 
@@ -350,7 +384,7 @@ class Nerf2vecTrainer:
         self.logfn({f'{split}/PSNR': mean_psnr})
         # self.logfn({f'{split}/PSNR_UNMASKED': mean_psnr_unmasked})
         
-        if split == "val" and mean_psnr > self.best_psnr:
+        if split == 'validation' and mean_psnr > self.best_psnr:
             self.best_psnr = mean_psnr
             self.save_ckpt(best=True)
     
@@ -376,7 +410,7 @@ class Nerf2vecTrainer:
         matrices_flattened = matrices_flattened.cuda()
         
         with autocast():
-            pixels, _ = render_image_GT(
+            pixels, alpha, _ = render_image_GT(
                             radiance_field=self.ngp_mlp, 
                             occupancy_grid=self.occupancy_grid, 
                             rays=rays, 
@@ -388,6 +422,7 @@ class Nerf2vecTrainer:
                             ngp_mlp=self.ngp_mlp,
                             device=self.device,
                             training=False)
+            pixels = pixels * alpha + color_bkgds.unsqueeze(1).unsqueeze(1) * (1.0 - alpha)
         
             embeddings = self.encoder(matrices_flattened)
 

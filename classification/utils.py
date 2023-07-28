@@ -44,12 +44,15 @@ def get_mlp_params_as_matrix(flattened_params: Tensor, sd: Dict[str, Any] = None
 
     if sd is None:
          sd = get_mlp_sample_sd()
-
+    
     params_shapes = [p.shape for p in sd.values()]
     feat_dim = params_shapes[0][0]
+    """
     start = params_shapes[0].numel() #+ params_shapes[1].numel()
     end = params_shapes[-1].numel() #+ params_shapes[-2].numel()
     params = flattened_params[start:-end]
+    """
+    params = flattened_params
     return params.reshape((-1, feat_dim))
 
 
@@ -76,6 +79,9 @@ def get_grid_file_name(file_path):
 def get_class_label(file_path):
     directories = os.path.normpath(file_path).split(os.sep)
     class_label = directories[-3]
+
+    if class_label == '02992529' or class_label == '03948459':
+        return -1
     
     return class_label
 
