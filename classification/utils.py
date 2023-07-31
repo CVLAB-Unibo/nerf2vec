@@ -97,4 +97,14 @@ def unzip_file(file_path, extract_dir, file_name):
         output_path = os.path.join(extract_dir, file_name) 
         with open(output_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
+
+def load_nerf2vec_checkpoint():
+    ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
+    ckpt_paths = [p for p in ckpts_path.glob("*.pt") if "best" not in p.name]
+    error_msg = "Expected only one ckpt apart from best, found none or too many."
+    assert len(ckpt_paths) == 1, error_msg
+    ckpt_path = ckpt_paths[0]
+    print(f'loading path: {ckpt_path}')
+    ckpt = torch.load(ckpt_path)
     
+    return ckpt
