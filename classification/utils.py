@@ -2,6 +2,7 @@ from collections import OrderedDict
 import datetime
 import gzip
 import os
+from pathlib import Path
 import shutil
 from typing import Any, Dict
 from torch import Tensor
@@ -48,11 +49,17 @@ def get_mlp_params_as_matrix(flattened_params: Tensor, sd: Dict[str, Any] = None
     params_shapes = [p.shape for p in sd.values()]
     feat_dim = params_shapes[0][0]
     """
+    # Remove start/end layer weights
     start = params_shapes[0].numel() #+ params_shapes[1].numel()
     end = params_shapes[-1].numel() #+ params_shapes[-2].numel()
     params = flattened_params[start:-end]
     """
-    params = flattened_params
+    padding_size = (feat_dim-params_shapes[-1][0]) * params_shapes[-1][1]
+    padding_tensor = torch.zeros(padding_size)
+    params = torch.cat((flattened_params, padding_tensor), dim=0)
+
+    # TODO: for the future, it could be possible to try to transpose the returned matrix.
+    # this would be more compliant to inr2vec
     return params.reshape((-1, feat_dim))
 
 
@@ -80,6 +87,7 @@ def get_class_label(file_path):
     directories = os.path.normpath(file_path).split(os.sep)
     class_label = directories[-3]
 
+    # TODO: REMOVE THIS AND BETTER COPE WITH THESE CLASSES
     if class_label == '02992529' or class_label == '03948459':
         return -1
     

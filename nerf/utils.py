@@ -1,3 +1,4 @@
+import math
 import random
 import time
 from typing import Optional
@@ -22,7 +23,7 @@ def set_random_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
     
-    
+
 def render_image(
     # scene
     radiance_field: torch.nn.Module,             
@@ -92,14 +93,15 @@ def render_image(
                 weights['occs'] = torch.empty([884736])   # 884736 if resolution == 96 else 2097152
                 occupancy_grid.load_state_dict(weights)
                 """
-                dict = {
-                    '_roi_aabb': grid_weights['_roi_aabb'][batch_idx],
-                    '_binary': grid_weights['_binary'][batch_idx],
-                    'resolution': grid_weights['resolution'][batch_idx],
-                    'occs': grid_weights['occs'][batch_idx],
-                }
-                # occupancy_grid = None
-                occupancy_grid.load_state_dict(dict)
+                if grid_weights != None:
+                    dict = {
+                        '_roi_aabb': grid_weights['_roi_aabb'][batch_idx],
+                        '_binary': grid_weights['_binary'][batch_idx],
+                        'resolution': grid_weights['resolution'][batch_idx],
+                        'occs': grid_weights['occs'][batch_idx],
+                    }
+                    # occupancy_grid = None
+                    occupancy_grid.load_state_dict(dict)
                 
                 ray_indices, t_starts, t_ends = ray_marching(
                     chunk_rays.origins[batch_idx],  
@@ -335,7 +337,7 @@ def render_image_GT(
     timestamps: Optional[torch.Tensor] = None,
     grid_weights  = None,
     ngp_mlp_weights= None,
-    ngp_mlp=None,
+    # ngp_mlp=None,
     device='cuda:0',
     training=True,
     max_elements=1024
@@ -411,7 +413,7 @@ def render_image_GT(
             'mlp_base.params': ngp_mlp_weights['mlp_base.params'][batch_idx]
         }
 
-        ngp_mlp.load_state_dict(curr_ngp_mlp_weights)
+        radiance_field.load_state_dict(curr_ngp_mlp_weights)
         occupancy_grid.load_state_dict(curr_grid_weights)
 
         curr_rays = Rays(origins=rays.origins[batch_idx], viewdirs=rays.viewdirs[batch_idx])
@@ -421,7 +423,7 @@ def render_image_GT(
         chunk = (
             torch.iinfo(torch.int32).max
             if training
-            else 1024
+            else 4096
         )
 
         for i in range(0, num_rays, chunk):
@@ -466,6 +468,7 @@ def render_image_GT(
     
             filtered_rays.origins[batch_idx] = rays.origins[batch_idx][indices]
             filtered_rays.viewdirs[batch_idx] = rays.viewdirs[batch_idx][indices]
+        
         
         
         pixels[batch_idx] = colors.view((*rays_shape[1:-1], -1))
