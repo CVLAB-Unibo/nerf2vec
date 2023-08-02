@@ -87,12 +87,6 @@ def render_image(
             
             for batch_idx in range(batch_size):
                 
-                """
-                weights = torch.load(grid_weights[batch_idx])
-                weights['_binary'] = weights['_binary'].to_dense()
-                weights['occs'] = torch.empty([884736])   # 884736 if resolution == 96 else 2097152
-                occupancy_grid.load_state_dict(weights)
-                """
                 if grid_weights != None:
                     dict = {
                         '_roi_aabb': grid_weights['_roi_aabb'][batch_idx],
@@ -102,6 +96,8 @@ def render_image(
                     }
                     # occupancy_grid = None
                     occupancy_grid.load_state_dict(dict)
+
+                    
                 
                 ray_indices, t_starts, t_ends = ray_marching(
                     chunk_rays.origins[batch_idx],  
