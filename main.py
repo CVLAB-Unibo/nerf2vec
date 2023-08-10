@@ -41,7 +41,7 @@ if __name__ == '__main__':
             print(f"Method '{method_name}' does not exist.")
     """
 
-    train_nerf2vec()
+    # train_nerf2vec()
     # generate_grids()
     # export_embeddings()
-    # train_classifier()
+    train_classifier()

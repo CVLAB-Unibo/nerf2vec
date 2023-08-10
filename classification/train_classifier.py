@@ -44,15 +44,20 @@ class InrEmbeddingDataset(Dataset):
             class_id = np.array(f.get("class_id"))
             class_id = torch.from_numpy(class_id).long()
             
+            
             data_dir = f["data_dir"][()].decode("utf-8")
+            """
             weights_file_path = os.path.join(data_dir, config.NERF_WEIGHTS_FILE_NAME)
-
             mlp_params = torch.load(weights_file_path, map_location=torch.device('cpu'))# ['mlp_base.params']
             mlp_matrix = get_mlp_params_as_matrix(mlp_params['mlp_base.params'])
+            """
             
+            
+            
+        # return data_dir, mlp_params['mlp_base.params'], class_id
 
-        # return embedding, class_id
-        return mlp_params['mlp_base.params'], class_id
+        return data_dir, embedding, class_id
+        
     
 class InrEmbeddingClassifier:
     def __init__(self, device='cuda:0') -> None:
@@ -129,6 +134,29 @@ class InrEmbeddingClassifier:
     def train(self) -> None:
         
         self.config_wandb()
+        """
+        classes_freq = {
+                0: 9614, 
+                1: 4149,
+                2: 3764, 
+                3: 8410, 
+                4: 15831,
+                5: 2614, 
+                6: 5432, 
+                7: 3827, 
+                8: 5333, 
+                9: 7249, 
+                10: 20099,
+                11: 872, 
+                12: 4593
+            }
+        num_classes = len(classes_freq)
+        total_samples = sum(classes_freq.values())
+        # Compute class weights based on class frequencies in the classes_freq dictionary
+        class_weights = torch.tensor([total_samples / (num_classes * classes_freq[label]) for label in range(num_classes)], dtype=torch.float, device='cuda')
+        # Normalize class weights to sum up to 1
+        class_weights /= class_weights.sum()
+        """
 
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
@@ -140,7 +168,7 @@ class InrEmbeddingClassifier:
 
             desc = f"Epoch {epoch}/{num_epochs}"
             for batch in self.train_loader:
-                embeddings, labels = batch
+                _, embeddings, labels = batch
                 embeddings = embeddings.cuda()
                 labels = labels.cuda()
 
@@ -191,7 +219,7 @@ class InrEmbeddingClassifier:
 
         losses = []
         for batch in loader:
-            params, labels = batch
+            _, params, labels = batch
             params = params.cuda()
             labels = labels.cuda()
 
