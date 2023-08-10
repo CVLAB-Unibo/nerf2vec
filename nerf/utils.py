@@ -8,7 +8,7 @@ import torch
 import collections
 import torch.nn.functional as F
 
-from nerfacc import OccupancyGrid, ray_marching, render_visibility, rendering
+from nerfacc import OccupancyGrid, contract_inv, ray_marching, render_visibility, rendering
 
 Rays = collections.namedtuple("Rays", ("origins", "viewdirs"))
 
@@ -38,7 +38,8 @@ def render_image(
     render_bkgd: Optional[torch.Tensor] = None,  
     cone_angle: float = 0.0,
     alpha_thre: float = 0.0,
-    grid_weights:dict = None
+    grid_weights:dict = None,
+    background_indices = None
 ):
     """Render the pixels of an image."""
 
@@ -70,7 +71,7 @@ def render_image(
         else 4096
     )
     
-    MAX_SIZE = 20000  # Desired maximum size  # TODO: add a configuration variable
+    MAX_SIZE = 25000  # Desired maximum size  # TODO: add a configuration variable
 
     for i in range(0, num_rays, chunk):
         chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)
@@ -79,6 +80,8 @@ def render_image(
         b_t_starts = []
         b_t_ends = []
         b_ray_indices = []
+        b_background_positions = []
+        b_elements_before_padding = []
 
         # ####################
         # RAY MARCHING
@@ -97,7 +100,7 @@ def render_image(
                     # occupancy_grid = None
                     occupancy_grid.load_state_dict(dict)
 
-                    
+
                 
                 ray_indices, t_starts, t_ends = ray_marching(
                     chunk_rays.origins[batch_idx],  
@@ -134,8 +137,25 @@ def render_image(
                 # MAX_SIZE, _ = torch.max(stacked_tensor, dim=0) 
 
                 for batch_idx in range(batch_size):
+                    
+                    if background_indices is not None:
+                        grid_coords = occupancy_grid.grid_coords[background_indices][batch_idx]
+                        bg_positions = (
+                            grid_coords + torch.rand_like(grid_coords, dtype=torch.float32)
+                        ) / occupancy_grid.resolution
+
+                        bg_positions = contract_inv(
+                            bg_positions,
+                            roi=occupancy_grid._roi_aabb,
+                            type=occupancy_grid._contraction_type,
+                        )
+                        b_background_positions.append(bg_positions)
+
+                    
                     # l.append(b_positions[batch_idx].size(0))
-                    # print(b_positions[batch_idx].size(0))
+                    print(b_positions[batch_idx].size(0))
+                    b_elements_before_padding.append(b_positions[batch_idx].size(0))
+
                     # PADDING
                     if b_positions[batch_idx].size(0) < MAX_SIZE:
                         
@@ -162,7 +182,7 @@ def render_image(
                         # ################################################################################
                         # NEW WAY
                         # ################################################################################       
-                        """
+                        '''
                         new_indices = torch.zeros(MAX_SIZE, dtype=torch.int32, device='cuda')
                         RATIO = MAX_SIZE/b_positions[batch_idx].size(0)
 
@@ -210,17 +230,17 @@ def render_image(
 
                         # new_values, new_counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
                         # assert torch.eq(values, new_values).all().item(), "ERROR"
-                        """                 
+                        '''                 
                         
                         # ################################################################################
                         # OLD WAY
                         # ################################################################################
-                        """
+                        '''
                         b_positions[batch_idx] = b_positions[batch_idx][:MAX_SIZE]
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][:MAX_SIZE]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][:MAX_SIZE]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][:MAX_SIZE]
-                        """
+                        '''
 
                         # ################################################################################
                         # FREQUENCY ORDER
@@ -228,7 +248,7 @@ def render_image(
                         # new_positions, new_indices = torch.sort(b_ray_indices[batch_idx], descending=True, stable=True)
                         # new_indices = new_indices[:MAX_SIZE]
 
-                        """
+                        '''
                         # Calculate the frequency of each value
                         values, counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
                         sorted_indices = torch.argsort(counts, descending=True)
@@ -242,7 +262,7 @@ def render_image(
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][new_indices]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][new_indices]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][new_indices]
-                        """
+                        '''
                         
                         
                         # ################################################################################
@@ -258,7 +278,9 @@ def render_image(
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][indices]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][indices]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][indices]
-                        
+
+                        # indices = random.sample(range(0, len(b_positions[batch_idx].shape[0])), MAX_SIZE)
+                        # indices, _ = torch.sort(indices)  # This is important to avoid problem with volume rendering
                         
                 # print(min(l), max(l))
             
@@ -268,6 +290,8 @@ def render_image(
             b_t_ends = torch.stack(b_t_ends, dim=0)
             b_ray_indices = torch.stack(b_ray_indices, dim=0)
             b_positions = torch.stack(b_positions, dim=0)
+            b_background_positions = torch.stack(b_background_positions, dim=0) if len(b_background_positions) > 0 else []
+            # b_elements_before_padding = torch.stack(b_elements_before_padding, dim=0) if len(b_elements_before_padding) > 0 else []
             
         # ####################
         # VOLUME RENDERING
@@ -310,7 +334,7 @@ def render_image(
     n_rendering_samples = [sum(tensor) for tensor in n_rendering_samples] 
     
     return (
-        colors, opacities, depths, n_rendering_samples
+        colors, opacities, depths, n_rendering_samples, b_background_positions, b_elements_before_padding
     )
 
 @torch.no_grad()
@@ -336,7 +360,7 @@ def render_image_GT(
     # ngp_mlp=None,
     device='cuda:0',
     training=True,
-    max_elements=1024
+    max_elements=512
 ):
     
     filtered_rays = rays
@@ -477,12 +501,14 @@ def sample_pixels_uniformly(opacities, colors, max_elements):
 
     # Get indices of True and False elements, where True means that the specified coordinate 
     # contains the 3d model, False otherwise.
-    all_indices = torch.tensor(range(len(opacities)), device=opacities.device)
+    # all_indices = torch.tensor(range(len(opacities)), device=opacities.device)
     true_indices =  torch.nonzero(opacities.squeeze()).squeeze()
+
+    """
     mask = ~torch.isin(all_indices, true_indices)
     false_indices = all_indices[mask]
 
-    PERCENTAGE = 50
+    PERCENTAGE = 99
     # Define the proportion of True and False elements
     MAX_ELEMENTS_PER_TYPE = (max_elements * PERCENTAGE) // 100
 
@@ -518,6 +544,10 @@ def sample_pixels_uniformly(opacities, colors, max_elements):
     else:
         merged_indices =  torch.stack([true_indices_capped, false_indices_capped], dim=1).view(-1)
 
+    new_colors = colors[merged_indices]
+    new_opacities = opacities[merged_indices]
+    """
+    merged_indices = true_indices[:max_elements]
     new_colors = colors[merged_indices]
     new_opacities = opacities[merged_indices]
 

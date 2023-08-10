@@ -1,9 +1,10 @@
 import datetime
 import json
 import math
+import random
 import time
 
-from nerfacc import OccupancyGrid
+from nerfacc import OccupancyGrid, contract_inv
 from classification.utils import get_mlp_params_as_matrix
 
 import os
@@ -26,6 +27,8 @@ from nerf.utils import Rays, render_image, render_image_GT
 from torch.cuda.amp import autocast
 
 import wandb
+import uuid
+import imageio.v2 as imageio
 
 class NeRFDataset(Dataset):
     def __init__(self, split_json: str, device: str) -> None:
@@ -76,11 +79,49 @@ class NeRFDataset(Dataset):
 
         grid_weights_path = os.path.join(data_dir, 'grid.pth')  
         grid_weights = torch.load(grid_weights_path, map_location=self.device)
-        grid_weights['_binary'] = grid_weights['_binary'].to_dense()
+        grid_weights['_binary'] = grid_weights['_binary'].to_dense().unsqueeze(dim=0)
         grid_weights['occs'] = torch.empty([884736])   # 884736 if resolution == 96 else 2097152
         
+        N = 10000
+        background_indices = self._sample_unoccupied_cells(N, grid_weights['_binary'][0])
 
-        return train_nerf, test_nerf, matrix_unflattened, matrix_flattened, grid_weights, data_dir
+        return train_nerf, test_nerf, matrix_unflattened, matrix_flattened, grid_weights, data_dir, background_indices
+    
+    def _sample_unoccupied_cells(self, n: int, binary: torch.Tensor) -> torch.Tensor:
+        
+        # 0 -> PERMUTAION
+        # 1 -> BETAVARIATE
+        # 2 -> UNIFORM SAMPLE WITHOUT REPLACEMENT
+        APPROACH = 2
+
+        zero_indices = torch.nonzero(binary.flatten() == 0)[:, 0]
+
+        
+        # PERMUTATION
+        if APPROACH == 0:
+            randomized_indices = zero_indices[torch.randperm(zero_indices.size(0))][:n]
+
+        # BETAVARIATE
+        elif APPROACH == 1:
+            alpha = 4
+            beta = 4
+
+            probabilities = [random.betavariate(alpha, beta) for _ in range(len(zero_indices))]
+
+            # Normalize the probabilities to sum up to 1
+            total_prob = sum(probabilities)
+            probabilities = [p / total_prob for p in probabilities]
+
+            # Perform weighted random sampling to get n indices
+            randomized_indices = random.choices(range(0, len(zero_indices)), probabilities, k=n)
+
+        # UNIFORM SAMPLE WITHOUT REPLACEMENT
+        elif APPROACH == 2:
+            randomized_indices = random.sample(range(0, len(zero_indices)), n)
+        
+        randomized_indices = zero_indices[randomized_indices]
+        return randomized_indices
+        
     
 class Nerf2vecTrainer:
     def __init__(self, device='cuda:0') -> None:
@@ -159,6 +200,7 @@ class Nerf2vecTrainer:
         wd = config.WD
         params = list(self.encoder.parameters())
         params.extend(self.decoder.parameters())
+        
         self.optimizer = AdamW(params, lr, weight_decay=wd)
         # self.optimizer = AdamW(params, lr, weight_decay=wd, eps=1e-15)
         self.grad_scaler = torch.cuda.amp.GradScaler(2**10)
@@ -184,8 +226,18 @@ class Nerf2vecTrainer:
         
         num_steps = config.NUM_EPOCHS * len(self.train_loader)
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, config.LR, total_steps=num_steps)
-        """
+        
 
+        total_training_steps = config.NUM_EPOCHS * len(self.train_loader)
+        warmup_steps = 100
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, 
+                                                             max_lr=1e-2, 
+                                                             div_factor=100,
+                                                             total_steps=total_training_steps, 
+                                                             final_div_factor=10,
+                                                             pct_start=(warmup_steps)/total_training_steps
+                                                            )
+        """
         
         self.epoch = 0
         self.global_step = 0
@@ -200,7 +252,6 @@ class Nerf2vecTrainer:
         self.ckpts_path.mkdir(parents=True, exist_ok=True)
         self.all_ckpts_path.mkdir(parents=True, exist_ok=True)
 
-
     def logfn(self, values: Dict[str, Any]) -> None:
         wandb.log(values, step=self.global_step, commit=False)
 
@@ -208,8 +259,12 @@ class Nerf2vecTrainer:
 
         self.config_wandb()
 
+
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
+
+        # self.plot('train')
+        # exit()
 
         for epoch in range(start_epoch, num_epochs):
 
@@ -224,11 +279,13 @@ class Nerf2vecTrainer:
             for batch_idx, batch in enumerate(self.train_loader):
                 # print(f'Batch {batch_idx} started...')
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
-                train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir = batch
+                train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir, background_indices = batch
+
                 # print(data_dir)
                 rays = train_nerf['rays']
                 color_bkgds = train_nerf['color_bkgd']
-                color_bkgds = color_bkgds[0].unsqueeze(0).expand(len(matrices_flattened), -1) # TODO: refactor this 
+                # color_bkgds2 = color_bkgds[0].unsqueeze(0).expand(len(matrices_flattened), -1)
+                color_bkgds = color_bkgds[0][None].expand(len(matrices_flattened), -1)
 
                 rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
                 color_bkgds = color_bkgds.cuda()
@@ -245,15 +302,13 @@ class Nerf2vecTrainer:
                             color_bkgds=color_bkgds,
                             grid_weights=grid_weights,
                             ngp_mlp_weights=matrices_unflattened,
-                            ngp_mlp=self.ngp_mlp,
+                            # ngp_mlp=self.ngp_mlp,
                             device=self.device)
-                    
-                    # TODO: CHECK ALPHA AND BACKGROUND APPLICATION
                     pixels = pixels * alpha + color_bkgds.unsqueeze(1) * (1.0 - alpha)
 
                     embeddings = self.encoder(matrices_flattened)
                     
-                    rgb, acc, _, n_rendering_samples = render_image(
+                    rgb, acc, _, n_rendering_samples, bg_positions, n_points = render_image(
                         self.decoder,
                         embeddings,
                         self.occupancy_grid,
@@ -261,29 +316,86 @@ class Nerf2vecTrainer:
                         self.scene_aabb,
                         render_step_size=self.render_step_size,
                         render_bkgd=color_bkgds,
-                        grid_weights=grid_weights
+                        grid_weights=grid_weights,
+                        background_indices=background_indices
                     )
+
+
+                    print(n_points)
 
                     # TODO: evaluate whether to add this condition or not
                     if 0 in n_rendering_samples:
                         print(f'0 n_rendering_samples. Skip iteration.')
                         continue
 
-                    alive_ray_mask = acc.squeeze(-1) > 0
+                    #alive_ray_mask = acc.squeeze(-1) > 0
+                    alive_ray_mask = acc > 0
+
+                    # bg_pred = torch.nn.Sigmoid()(bg_pred)
+                    
+                    
+                    # ################################################################################
+                    # VERSION WITH DOUBLE LOSS - COMPUTING RGB FOR BACKGROUND
+                    # ###############################################################################
+                    
+                    bg_rgb_labels = color_bkgds[0].view(1, 3).expand(len(matrices_flattened), -1, -1)
+                    bg_rgb_labels = bg_rgb_labels.repeat(1, bg_positions.shape[1], 1)
+                    
+                    # Compute background predictions
+                    bg_rgb_pred , bg_alpha_pred = self.decoder(embeddings, bg_positions)  # bg_positions are all positions in the background
+                    # bg_rgb_pred = bg_rgb_pred + bg_rgb_labels.clone() * (1.0 - bg_alpha_pred)
+                    bg_rgb_pred = bg_rgb_pred * bg_alpha_pred + bg_rgb_labels.clone() * (1.0 - bg_alpha_pred)
+                    
+                    # Append to the foreground predictions and ground truths
+                    #rgb = torch.cat((rgb, bg_rgb_pred), dim=1)
+                    #pixels = torch.cat((pixels, bg_rgb_labels), dim=1)
+                    print(f'len_rgb: {rgb.shape[1]} - len_bg_rgb: {bg_rgb_pred.shape[1]}')
+                    print(f'losses: {F.smooth_l1_loss(rgb, pixels), F.smooth_l1_loss(bg_rgb_pred, bg_rgb_labels)}')
+                    # Compute the loss
+                    total = rgb.shape[1] + bg_rgb_pred.shape[1]
+                    fg_weight = bg_rgb_pred.shape[1] / total
+                    bg_weight = rgb.shape[1] / total
+                    
+                    #fg_weight = 1
+                    #n_points_average = np.sum(n_points) / len(n_points)
+                    #min_range = np.min(n_points)
+                    #max_range = np.max(n_points)
+                    #bg_weight = (n_points_average - min_range) / (max_range - min_range)
+                    #print(f'bg_weight: {bg_weight}')
+                    
+                    fg_weight = 1.0
+                    bg_weight = 0.2533
+        
+                    loss = F.smooth_l1_loss(rgb, pixels) * fg_weight + F.smooth_l1_loss(bg_rgb_pred, bg_rgb_labels) * bg_weight
+                    # loss = F.smooth_l1_loss(rgb, pixels) + (F.smooth_l1_loss(bg_rgb_pred, bg_rgb_labels) * (512/10000))
                     # loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
-                    loss = F.smooth_l1_loss(rgb, pixels)
+                    print(loss)
+                    
+                    # ################################################################################
+                    # VERSION WITH DOUBLE LOSS - COMPUTING ONLY ALPHA FOR BACKGROUND
+                    # ################################################################################
+                    """
+                    bg_labels_shape = (bg_positions.shape[0], bg_positions.shape[1], 1)
+                    bg_alpha_labels = torch.zeros(bg_labels_shape, device=bg_positions.device, dtype=torch.float32)
+                    _ , bg_alpha_pred = self.decoder(embeddings, bg_positions)
+                    
+                    total = rgb.shape[1] + bg_alpha_pred.shape[1]
+                    fg_weight = bg_alpha_pred.shape[1] / total
+                    bg_weight = rgb.shape[1] / total
+                    loss = F.smooth_l1_loss(rgb, pixels) * fg_weight + F.smooth_l1_loss(bg_alpha_pred, bg_alpha_labels) * bg_weight
+                    """ 
                     
                     
-                
+
                 self.optimizer.zero_grad()
-                # do not unscale 
                 self.grad_scaler.scale(loss).backward()
-                # loss.backward()
                 self.optimizer.step()
                 # self.scheduler.step()
-
+                
                 if self.global_step % 10 == 0:
                     self.logfn({"train/loss": loss.item()})
+                    # self.logfn({"train/LR":self.optimizer.param_groups[0]['lr']})
+                    # print(self.optimizer.param_groups[0]['lr'])
                     # self.logfn({"train/LR":self.scheduler.get_last_lr()[0]})
                 
                 self.global_step += 1
@@ -293,12 +405,12 @@ class Nerf2vecTrainer:
                     print(f'Completed {batch_idx} batches in {batch_end-batch_start}s')
 
             if epoch % 10 == 0 or epoch == num_epochs - 1:
-                
+                print()
                 self.val(split='train')
-                self.val(split='validation')
+                #self.val(split='validation')
 
                 self.plot(split='train')
-                self.plot(split='validation')
+                #self.plot(split='validation')
 
                 
             if epoch % 50 == 0:
@@ -325,7 +437,7 @@ class Nerf2vecTrainer:
 
         for batch_idx, batch in enumerate(loader):
 
-            train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir = batch
+            train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir, background_indices = batch
             rays = train_nerf['rays']
             color_bkgds = train_nerf['color_bkgd']
             color_bkgds = color_bkgds[0].unsqueeze(0).expand(len(matrices_flattened), -1) # TODO: refactor this
@@ -343,13 +455,13 @@ class Nerf2vecTrainer:
                             color_bkgds=color_bkgds,
                             grid_weights=grid_weights,
                             ngp_mlp_weights=matrices_unflattened,
-                            ngp_mlp=self.ngp_mlp,
+                            # ngp_mlp=self.ngp_mlp,
                             device=self.device)
                 pixels = pixels * alpha + color_bkgds.unsqueeze(1) * (1.0 - alpha)
                 
                 embeddings = self.encoder(matrices_flattened)
                 
-                rgb, acc, _, n_rendering_samples = render_image(
+                rgb, acc, _, n_rendering_samples, _, _ = render_image(
                     self.decoder,
                     embeddings,
                     self.occupancy_grid,
@@ -357,7 +469,8 @@ class Nerf2vecTrainer:
                     self.scene_aabb,
                     render_step_size=self.render_step_size,
                     render_bkgd=color_bkgds,
-                    grid_weights=grid_weights
+                    grid_weights=grid_weights,
+                    background_indices=None
                 )
 
                 # TODO: evaluate whether to add this condition or not
@@ -399,7 +512,7 @@ class Nerf2vecTrainer:
         self.decoder.eval()
 
         loader_iter = iter(loader)
-        _, test_nerf, matrices_unflattened, matrices_flattened, grid_weights, _ = next(loader_iter)
+        _, test_nerf, matrices_unflattened, matrices_flattened, grid_weights, _, _ = next(loader_iter)
         
         rays = test_nerf['rays']
         color_bkgds = test_nerf['color_bkgd']
@@ -419,7 +532,7 @@ class Nerf2vecTrainer:
                             color_bkgds=color_bkgds,
                             grid_weights=grid_weights,
                             ngp_mlp_weights=matrices_unflattened,
-                            ngp_mlp=self.ngp_mlp,
+                            # ngp_mlp=self.ngp_mlp,
                             device=self.device,
                             training=False)
             pixels = pixels * alpha + color_bkgds.unsqueeze(1).unsqueeze(1) * (1.0 - alpha)
@@ -435,7 +548,7 @@ class Nerf2vecTrainer:
                     'occs': [grid_weights['occs'][idx]],
                 }
         
-                rgb, _, _, _ = render_image(
+                rgb, _, _, _, _, _ = render_image(
                     radiance_field=self.decoder,
                     embeddings=embeddings[idx].unsqueeze(dim=0),
                     occupancy_grid=self.occupancy_grid,
@@ -446,25 +559,59 @@ class Nerf2vecTrainer:
                     grid_weights=curr_grid_weights
                 )
 
+                
+                rgb_A = torch.empty((224,224,3), device='cpu')
+                for i in range(224):
+                    rgb_A_chunck, alpha, b, c, _, _ = render_image(
+                                radiance_field=self.decoder,
+                                embeddings=embeddings[idx].unsqueeze(dim=0),
+                                occupancy_grid=None,
+                                rays=Rays(origins=rays.origins[idx, i, :, :].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx, i, :, :].unsqueeze(dim=0)),
+                                scene_aabb=self.scene_aabb,
+                                render_step_size=self.render_step_size,
+                                render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
+                                grid_weights=None
+                            )
+                    rgb_A[i, :, :] = rgb_A_chunck[0].cpu().detach()
+                    del alpha
+                    del b
+                    del c
+                    del rgb_A_chunck
+                    torch.cuda.empty_cache()
+                
+                pred_image_2=wandb.Image((rgb_A.numpy() * 255).astype(np.uint8))
                 pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
                 gt_image = wandb.Image((pixels.to('cpu').detach().numpy()[idx] * 255).astype(np.uint8))
+                
 
-                self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image]})
-        
+                self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image, pred_image_2]})
+                
+                
+                img_name = str(uuid.uuid4())
+                plots_path = 'plots'
+                """
+                imageio.imwrite(
+                    os.path.join(plots_path, f'{img_name}_{split}_gt_{self.global_step}.png'),
+                    (pixels.cpu().detach().numpy()[idx] * 255).astype(np.uint8)
+                )
+                
+                imageio.imwrite(
+                    os.path.join(plots_path, f'{img_name}_{split}_pred_{self.global_step}_GRID.png'),
+                    (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8)
+                )
 
-            """
-            #img_name = get_nerf_name_from_grid(grid_weights_path[idx])
-            img_name = str(uuid.uuid4())
-            plots_path = 'plots'
-            imageio.imwrite(
-                os.path.join(plots_path, f'{img_name}_{split}_pred_{self.global_step}.png'),
-                (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8)
-            )
-            imageio.imwrite(
-                os.path.join(plots_path, f'{img_name}_{split}_gt_{self.global_step}.png'),
-                (pixels.cpu().detach().numpy()[idx] * 255).astype(np.uint8)
-            )
-            """
+                
+                img_name = f'{img_name}_{split}_pred_{self.global_step}'
+                plots_path = 'plots'
+                imageio.imwrite(
+                    os.path.join(plots_path, f'{img_name}.png'),
+                    (rgb_A.numpy() * 255).astype(np.uint8)
+                )"""
+                
+                
+            
+            
+            
             
             
 
