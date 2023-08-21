@@ -79,15 +79,16 @@ class NeRFDataset(Dataset):
 
         grid_weights_path = os.path.join(data_dir, 'grid.pth')  
         grid_weights = torch.load(grid_weights_path, map_location=self.device)
-        grid_weights['_binary'] = grid_weights['_binary'].to_dense().unsqueeze(dim=0)
-        grid_weights['occs'] = torch.empty([884736])   # 884736 if resolution == 96 else 2097152
+        grid_weights['_binary'] = grid_weights['_binary'].to_dense()#.unsqueeze(dim=0)
+        n_total_cells = 884736
+        grid_weights['occs'] = torch.empty([n_total_cells])   # 884736 if resolution == 96 else 2097152
         
-        N = 10000
-        background_indices = self._sample_unoccupied_cells(N, grid_weights['_binary'][0])
+        N = 30000
+        background_indices, n_true_coordinates = self._sample_unoccupied_cells(N, grid_weights['_binary'], data_dir, n_total_cells)
 
-        return train_nerf, test_nerf, matrix_unflattened, matrix_flattened, grid_weights, data_dir, background_indices
+        return train_nerf, test_nerf, matrix_unflattened, matrix_flattened, grid_weights, data_dir, background_indices, n_true_coordinates
     
-    def _sample_unoccupied_cells(self, n: int, binary: torch.Tensor) -> torch.Tensor:
+    def _sample_unoccupied_cells(self, n: int, binary: torch.Tensor, data_dir, n_total_cells: int) -> torch.Tensor:
         
         # 0 -> PERMUTAION
         # 1 -> BETAVARIATE
@@ -95,6 +96,13 @@ class NeRFDataset(Dataset):
         APPROACH = 2
 
         zero_indices = torch.nonzero(binary.flatten() == 0)[:, 0]
+        # one_indices = torch.nonzero(binary.flatten() == 1)[:, 0]
+        n_one_indices = n_total_cells - len(zero_indices)
+
+        # print(f'one_indices: {len(one_indices)}, zero_indices: {len(zero_indices)}')
+        # print(len(zero_indices))
+        if len(zero_indices) < n:
+            print(f'ERROR: {len(zero_indices)} - {data_dir}')
 
         
         # PERMUTATION
@@ -117,10 +125,11 @@ class NeRFDataset(Dataset):
 
         # UNIFORM SAMPLE WITHOUT REPLACEMENT
         elif APPROACH == 2:
+
             randomized_indices = random.sample(range(0, len(zero_indices)), n)
         
         randomized_indices = zero_indices[randomized_indices]
-        return randomized_indices
+        return randomized_indices, n_one_indices
         
     
 class Nerf2vecTrainer:
@@ -130,11 +139,11 @@ class Nerf2vecTrainer:
 
         train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
         train_dset = NeRFDataset(train_dset_json, device='cpu') 
-        
+
         self.train_loader = DataLoader(
             train_dset,
             batch_size=config.BATCH_SIZE,
-            shuffle=True,
+            shuffle=True, 
             num_workers=8, 
             persistent_workers=False, 
             prefetch_factor=2,
@@ -177,7 +186,6 @@ class Nerf2vecTrainer:
             aabb=torch.tensor(config.GRID_AABB, dtype=torch.float32, device=self.device)
         )
         self.decoder = decoder.to(self.device)
-
         occupancy_grid = OccupancyGrid(
             roi_aabb=config.GRID_AABB,
             resolution=config.GRID_RESOLUTION,
@@ -241,7 +249,7 @@ class Nerf2vecTrainer:
         
         self.epoch = 0
         self.global_step = 0
-        self.best_psnr = float(0)  # float("inf")
+        self.best_psnr = float("inf")
 
         self.ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
         self.all_ckpts_path = Path(os.path.join('classification', 'train', 'all_ckpts'))
@@ -263,7 +271,8 @@ class Nerf2vecTrainer:
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
 
-        # self.plot('train')
+        # self.plot2('train')
+        # self.val('train')
         # exit()
 
         for epoch in range(start_epoch, num_epochs):
@@ -279,7 +288,7 @@ class Nerf2vecTrainer:
             for batch_idx, batch in enumerate(self.train_loader):
                 # print(f'Batch {batch_idx} started...')
                 # rays, pixels, render_bkgds, matrices, nerf_weights_path = batch
-                train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir, background_indices = batch
+                train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir, background_indices, n_true_coordinates = batch
 
                 # print(data_dir)
                 rays = train_nerf['rays']
@@ -308,7 +317,7 @@ class Nerf2vecTrainer:
 
                     embeddings = self.encoder(matrices_flattened)
                     
-                    rgb, acc, _, n_rendering_samples, bg_positions, n_points = render_image(
+                    rgb, acc, _, n_rendering_samples,  bg_rgb_pred, bg_rgb_label = render_image(
                         self.decoder,
                         embeddings,
                         self.occupancy_grid,
@@ -321,7 +330,7 @@ class Nerf2vecTrainer:
                     )
 
 
-                    print(n_points)
+                    # print(n_points)
 
                     # TODO: evaluate whether to add this condition or not
                     if 0 in n_rendering_samples:
@@ -338,65 +347,54 @@ class Nerf2vecTrainer:
                     # VERSION WITH DOUBLE LOSS - COMPUTING RGB FOR BACKGROUND
                     # ###############################################################################
                     
-                    bg_rgb_labels = color_bkgds[0].view(1, 3).expand(len(matrices_flattened), -1, -1)
-                    bg_rgb_labels = bg_rgb_labels.repeat(1, bg_positions.shape[1], 1)
+                    fg_loss = F.smooth_l1_loss(rgb, pixels) * config.FG_WEIGHT
+                    bg_loss = F.smooth_l1_loss(bg_rgb_pred, bg_rgb_label) * config.BG_WEIGHT
                     
-                    # Compute background predictions
-                    bg_rgb_pred , bg_alpha_pred = self.decoder(embeddings, bg_positions)  # bg_positions are all positions in the background
-                    # bg_rgb_pred = bg_rgb_pred + bg_rgb_labels.clone() * (1.0 - bg_alpha_pred)
-                    bg_rgb_pred = bg_rgb_pred * bg_alpha_pred + bg_rgb_labels.clone() * (1.0 - bg_alpha_pred)
+                    """
+                    bg_loss = F.smooth_l1_loss(bg_rgb_pred, bg_rgb_label, reduction='none')
+                    bg_weights = get_bg_weight(n_true_coordinates).cuda()
+                    bg_weights = bg_weights.unsqueeze(1).unsqueeze(2) 
+                    bg_loss *= bg_weights
+                    bg_loss = torch.mean(bg_loss)
+
+                    fg_loss = F.smooth_l1_loss(rgb, pixels, reduction='none')
+                    fg_weights = 1-bg_weights
+                    fg_loss *= fg_weights
+                    fg_loss = torch.mean(fg_loss)
+                    """
                     
-                    # Append to the foreground predictions and ground truths
-                    #rgb = torch.cat((rgb, bg_rgb_pred), dim=1)
-                    #pixels = torch.cat((pixels, bg_rgb_labels), dim=1)
-                    print(f'len_rgb: {rgb.shape[1]} - len_bg_rgb: {bg_rgb_pred.shape[1]}')
-                    print(f'losses: {F.smooth_l1_loss(rgb, pixels), F.smooth_l1_loss(bg_rgb_pred, bg_rgb_labels)}')
-                    # Compute the loss
-                    total = rgb.shape[1] + bg_rgb_pred.shape[1]
-                    fg_weight = bg_rgb_pred.shape[1] / total
-                    bg_weight = rgb.shape[1] / total
-                    
-                    #fg_weight = 1
-                    #n_points_average = np.sum(n_points) / len(n_points)
-                    #min_range = np.min(n_points)
-                    #max_range = np.max(n_points)
-                    #bg_weight = (n_points_average - min_range) / (max_range - min_range)
-                    #print(f'bg_weight: {bg_weight}')
-                    
-                    fg_weight = 1.0
-                    bg_weight = 0.2533
-        
-                    loss = F.smooth_l1_loss(rgb, pixels) * fg_weight + F.smooth_l1_loss(bg_rgb_pred, bg_rgb_labels) * bg_weight
-                    # loss = F.smooth_l1_loss(rgb, pixels) + (F.smooth_l1_loss(bg_rgb_pred, bg_rgb_labels) * (512/10000))
-                    # loss = F.smooth_l1_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
-                    print(loss)
+                    print(fg_loss, bg_loss)
+
+                    loss = fg_loss + bg_loss
                     
                     # ################################################################################
                     # VERSION WITH DOUBLE LOSS - COMPUTING ONLY ALPHA FOR BACKGROUND
                     # ################################################################################
                     """
-                    bg_labels_shape = (bg_positions.shape[0], bg_positions.shape[1], 1)
-                    bg_alpha_labels = torch.zeros(bg_labels_shape, device=bg_positions.device, dtype=torch.float32)
-                    _ , bg_alpha_pred = self.decoder(embeddings, bg_positions)
+                    fg_loss = F.smooth_l1_loss(rgb, pixels)
                     
-                    total = rgb.shape[1] + bg_alpha_pred.shape[1]
-                    fg_weight = bg_alpha_pred.shape[1] / total
-                    bg_weight = rgb.shape[1] / total
-                    loss = F.smooth_l1_loss(rgb, pixels) * fg_weight + F.smooth_l1_loss(bg_alpha_pred, bg_alpha_labels) * bg_weight
-                    """ 
-                    
-                    
+                    bg_loss = F.smooth_l1_loss(bg_sigma_pred, bg_sigma_label)
+                    bg_loss *= 0.01
 
+                    '''
+                    bg_loss = F.smooth_l1_loss(bg_sigma_pred, bg_sigma_label, reduction='none')
+                    bg_weights = get_bg_weight(n_true_coordinates).cuda()
+                    bg_weights = bg_weights.unsqueeze(1).unsqueeze(2) 
+                    bg_loss *= bg_weights
+                    bg_loss = torch.mean(bg_loss)
+                    '''
+                    
+                    loss = fg_loss + bg_loss
+                    print(fg_loss, bg_loss)
+                    """
+                    
                 self.optimizer.zero_grad()
                 self.grad_scaler.scale(loss).backward()
+
                 self.optimizer.step()
-                # self.scheduler.step()
-                
+
                 if self.global_step % 10 == 0:
                     self.logfn({"train/loss": loss.item()})
-                    # self.logfn({"train/LR":self.optimizer.param_groups[0]['lr']})
-                    # print(self.optimizer.param_groups[0]['lr'])
-                    # self.logfn({"train/LR":self.scheduler.get_last_lr()[0]})
                 
                 self.global_step += 1
 
@@ -404,8 +402,8 @@ class Nerf2vecTrainer:
                 if batch_idx % 1000 == 0:
                     print(f'Completed {batch_idx} batches in {batch_end-batch_start}s')
 
-            if epoch % 10 == 0 or epoch == num_epochs - 1:
-                print()
+            if (epoch > 0 and epoch % 10 == 0) or epoch == num_epochs - 1:
+                # print()
                 self.val(split='train')
                 #self.val(split='validation')
 
@@ -437,7 +435,7 @@ class Nerf2vecTrainer:
 
         for batch_idx, batch in enumerate(loader):
 
-            train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir, background_indices = batch
+            train_nerf, _, matrices_unflattened, matrices_flattened, grid_weights, data_dir, background_indices, n_true_coordinates = batch
             rays = train_nerf['rays']
             color_bkgds = train_nerf['color_bkgd']
             color_bkgds = color_bkgds[0].unsqueeze(0).expand(len(matrices_flattened), -1) # TODO: refactor this
@@ -461,7 +459,7 @@ class Nerf2vecTrainer:
                 
                 embeddings = self.encoder(matrices_flattened)
                 
-                rgb, acc, _, n_rendering_samples, _, _ = render_image(
+                rgb, acc, _, n_rendering_samples, bg_rgb_pred, bg_rgb_label = render_image(
                     self.decoder,
                     embeddings,
                     self.occupancy_grid,
@@ -470,32 +468,43 @@ class Nerf2vecTrainer:
                     render_step_size=self.render_step_size,
                     render_bkgd=color_bkgds,
                     grid_weights=grid_weights,
-                    background_indices=None
+                    background_indices=background_indices
                 )
-
+                
                 # TODO: evaluate whether to add this condition or not
                 if 0 in n_rendering_samples:
                     self.logfn({'ERROR': '0 n_rendering_samples. Skip iteration.'})
                     continue
                 # alive_ray_mask = acc.squeeze(-1) > 0
-                # mse_masked = F.mse_loss(rgb[alive_ray_mask], pixels[alive_ray_mask])
-                mse = F.mse_loss(rgb, pixels)
+                
+                fg_mse = F.mse_loss(rgb, pixels) * config.FG_WEIGHT
+                bg_mse = F.mse_loss(bg_rgb_pred, bg_rgb_label) * config.BG_WEIGHT
+
+                """
+                bg_mse = F.smooth_l1_loss(bg_rgb_pred, bg_rgb_label, reduction='none')
+                bg_weights = get_bg_weight(n_true_coordinates).cuda()
+                bg_weights = bg_weights.unsqueeze(1).unsqueeze(2) 
+                bg_mse *= bg_weights
+                bg_mse = torch.mean(bg_mse)
+
+                fg_mse = F.smooth_l1_loss(rgb, pixels, reduction='none')
+                fg_weights = 1-bg_weights
+                fg_mse *= fg_weights
+                fg_mse = torch.mean(fg_mse)
+                """
+
+                mse = fg_mse + bg_mse
             
             psnr = -10.0 * torch.log(mse) / np.log(10.0)
             psnrs.append(psnr.item())
-
-            # psnr_masked = -10.0 * torch.log(mse_masked) / np.log(10.0)
-            #psnrs_masked.append(psnr_masked.item())
 
             if idx > 99:
                 break
             idx+=1
         
         mean_psnr = sum(psnrs) / len(psnrs)
-        # mean_psnr_masked = sum(psnrs_masked) / len(psnrs_masked)
 
         self.logfn({f'{split}/PSNR': mean_psnr})
-        # self.logfn({f'{split}/PSNR_UNMASKED': mean_psnr_unmasked})
         
         if split == 'validation' and mean_psnr > self.best_psnr:
             self.best_psnr = mean_psnr
@@ -512,7 +521,7 @@ class Nerf2vecTrainer:
         self.decoder.eval()
 
         loader_iter = iter(loader)
-        _, test_nerf, matrices_unflattened, matrices_flattened, grid_weights, _, _ = next(loader_iter)
+        _, test_nerf, matrices_unflattened, matrices_flattened, grid_weights, data_dir, _, _ = next(loader_iter)
         
         rays = test_nerf['rays']
         color_bkgds = test_nerf['color_bkgd']
@@ -558,38 +567,29 @@ class Nerf2vecTrainer:
                     render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
                     grid_weights=curr_grid_weights
                 )
-
                 
-                rgb_A = torch.empty((224,224,3), device='cpu')
-                for i in range(224):
-                    rgb_A_chunck, alpha, b, c, _, _ = render_image(
+                rgb_A, alpha, _, _, _, _ = render_image(
                                 radiance_field=self.decoder,
                                 embeddings=embeddings[idx].unsqueeze(dim=0),
                                 occupancy_grid=None,
-                                rays=Rays(origins=rays.origins[idx, i, :, :].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx, i, :, :].unsqueeze(dim=0)),
+                                rays=Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
                                 scene_aabb=self.scene_aabb,
                                 render_step_size=self.render_step_size,
                                 render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
                                 grid_weights=None
-                            )
-                    rgb_A[i, :, :] = rgb_A_chunck[0].cpu().detach()
-                    del alpha
-                    del b
-                    del c
-                    del rgb_A_chunck
-                    torch.cuda.empty_cache()
+                )
                 
-                pred_image_2=wandb.Image((rgb_A.numpy() * 255).astype(np.uint8))
+                pred_image_2=wandb.Image((rgb_A.to('cpu').detach().numpy() * 255).astype(np.uint8))
                 pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
                 gt_image = wandb.Image((pixels.to('cpu').detach().numpy()[idx] * 255).astype(np.uint8))
-                
 
                 self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image, pred_image_2]})
+                                
                 
-                
+                """
                 img_name = str(uuid.uuid4())
                 plots_path = 'plots'
-                """
+
                 imageio.imwrite(
                     os.path.join(plots_path, f'{img_name}_{split}_gt_{self.global_step}.png'),
                     (pixels.cpu().detach().numpy()[idx] * 255).astype(np.uint8)
@@ -607,14 +607,151 @@ class Nerf2vecTrainer:
                     os.path.join(plots_path, f'{img_name}.png'),
                     (rgb_A.numpy() * 255).astype(np.uint8)
                 )"""
-                
-                
-            
-            
-            
-            
-            
+    """
+    @torch.no_grad()
+    def plot2(self, split: str) -> None:
+        
+        loader = self.train_loader if split == "train" else self.val_loader_shuffled
 
+        print('Plot started...')
+
+        self.encoder.eval()
+        self.decoder.eval()
+
+        loader_iter = iter(loader)
+        _, test_nerf, matrices_unflattened, matrices_flattened, grid_weights, data_dir, _, _ = next(loader_iter)
+        
+        psnrs = []
+        psnrs_no_bg = []
+
+        batch = next(loader_iter)
+
+        with open('0.2bg_weight.txt', 'a') as f:
+
+            while batch:
+                _, test_nerf, matrices_unflattened, matrices_flattened, grid_weights, data_dir, _, _ = batch
+            
+                rays = test_nerf['rays']
+                color_bkgds = test_nerf['color_bkgd']
+                
+                rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
+
+                color_bkgds = color_bkgds.cuda()
+                matrices_flattened = matrices_flattened.cuda()
+                
+                with autocast():
+                    pixels, alpha, _ = render_image_GT(
+                                    radiance_field=self.ngp_mlp, 
+                                    occupancy_grid=self.occupancy_grid, 
+                                    rays=rays, 
+                                    scene_aabb=self.scene_aabb, 
+                                    render_step_size=self.render_step_size,
+                                    color_bkgds=color_bkgds,
+                                    grid_weights=grid_weights,
+                                    ngp_mlp_weights=matrices_unflattened,
+                                    # ngp_mlp=self.ngp_mlp,
+                                    device=self.device,
+                                    training=False)
+                    pixels = pixels * alpha + color_bkgds.unsqueeze(1).unsqueeze(1) * (1.0 - alpha)
+                
+                    embeddings = self.encoder(matrices_flattened)
+
+                    for idx in range(len(matrices_flattened)):
+                        
+                        curr_grid_weights = {
+                            '_roi_aabb': [grid_weights['_roi_aabb'][idx]],
+                            '_binary': [grid_weights['_binary'][idx]],
+                            'resolution': [grid_weights['resolution'][idx]],
+                            'occs': [grid_weights['occs'][idx]],
+                        }
+                
+                        rgb, _, _, _, _, _ = render_image(
+                            radiance_field=self.decoder,
+                            embeddings=embeddings[idx].unsqueeze(dim=0),
+                            occupancy_grid=self.occupancy_grid,
+                            rays=Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
+                            scene_aabb=self.scene_aabb,
+                            render_step_size=self.render_step_size,
+                            render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
+                            grid_weights=curr_grid_weights
+                        )
+                        
+                        rgb_A, alpha, b, c, _, _ = render_image(
+                                        radiance_field=self.decoder,
+                                        embeddings=embeddings[idx].unsqueeze(dim=0),
+                                        occupancy_grid=None,
+                                        rays=Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
+                                        scene_aabb=self.scene_aabb,
+                                        render_step_size=self.render_step_size,
+                                        render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
+                                        grid_weights=None
+                        )
+                        
+                        pred_image_2=wandb.Image((rgb_A.to('cpu').detach().numpy() * 255).astype(np.uint8))
+                        pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
+                        gt_image = wandb.Image((pixels.to('cpu').detach().numpy()[idx] * 255).astype(np.uint8))
+
+                        self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image, pred_image_2]})
+
+                        # ################################################################################
+                        # TEMP CODE
+                        # ################################################################################
+                        mse = F.mse_loss(rgb_A[0], pixels[idx])
+                        psnr = -10.0 * torch.log(mse) / np.log(10.0)
+
+                        mse_no_bg = F.mse_loss(rgb[0], pixels[idx])
+                        psnr_no_bg = -10.0 * torch.log(mse_no_bg) / np.log(10.0)
+
+                        print(f'{data_dir[idx]}: {psnr.item()} - {psnr_no_bg.item()}')
+                        f.write(f'{data_dir[idx]}: {psnr.item()} - {psnr_no_bg.item()}\n')
+                        
+
+                        psnrs.append(psnr.item())
+                        psnrs_no_bg.append(psnr_no_bg.item())
+
+                        '''
+                        plots_path = 'plots'
+                        img_name = '_'.join(data_dir[idx].split('/')[-2:])
+                        imageio.imwrite(
+                            os.path.join(plots_path, f'{img_name}_{psnr.item()}.png'),
+                            (rgb_A.cpu().detach().numpy()[0] * 255).astype(np.uint8)
+                        )
+                        '''
+                        # ################################################################################
+                        
+                        '''
+                        img_name = str(uuid.uuid4())
+                        plots_path = 'plots'
+                        imageio.imwrite(
+                            os.path.join(plots_path, f'{img_name}_{split}_gt_{self.global_step}.png'),
+                            (pixels.cpu().detach().numpy()[idx] * 255).astype(np.uint8)
+                        )
+                        
+                        imageio.imwrite(
+                            os.path.join(plots_path, f'{img_name}_{split}_pred_{self.global_step}_GRID.png'),
+                            (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8)
+                        )
+
+                        
+                        img_name = f'{img_name}_{split}_pred_{self.global_step}'
+                        plots_path = 'plots'
+                        imageio.imwrite(
+                            os.path.join(plots_path, f'{img_name}.png'),
+                            (rgb_A.numpy() * 255).astype(np.uint8)
+                        )'''
+                try:
+                    batch = next(loader_iter)
+                except StopIteration:
+                    batch = None
+        
+            print(f'mean PSRN: {sum(psnrs) / len(psnrs)}')
+            print(f'mean PSRN (no BG): {sum(psnrs_no_bg) / len(psnrs_no_bg)}')
+
+            f.write('\n')
+            f.write(f'mean PSRN: {sum(psnrs) / len(psnrs)}\n')
+            f.write(f'mean PSRN (no BG): {sum(psnrs_no_bg) / len(psnrs_no_bg)}')
+     """           
+            
     def save_ckpt(self, best: bool = False, all: bool = False) -> None:
         ckpt = {
             "epoch": self.epoch,
@@ -657,6 +794,8 @@ class Nerf2vecTrainer:
             self.encoder.load_state_dict(ckpt["encoder"])
             self.decoder.load_state_dict(ckpt["decoder"])
             self.optimizer.load_state_dict(ckpt["optimizer"])
+
+            # self.optimizer.param_groups[0]['lr'] = 1e-2
     
     def config_wandb(self):
         wandb.init(

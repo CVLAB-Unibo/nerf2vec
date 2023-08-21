@@ -96,6 +96,7 @@ def create():
     
     base_path = 'dataset'
     
+    
     with open(os.path.join(base_path, 'train.json'), 'w') as file:
         json.dump(train, file)
     with open(os.path.join(base_path, 'validation.json'), 'w') as file:
@@ -103,14 +104,15 @@ def create():
     with open(os.path.join(base_path, 'test.json'), 'w') as file:
         json.dump(test, file)
     
+    
     """
     # Generate a subset (only for testing purpose)
     with open(os.path.join(base_path, 'train.json'), 'w') as file:
-        json.dump(random.sample(train, 2000), file)
+        json.dump(random.sample(train, 2048), file)
     with open(os.path.join(base_path, 'validation.json'), 'w') as file:
-        json.dump(random.sample(validation, 100), file)
+        json.dump(random.sample(validation, 10), file)
     with open(os.path.join(base_path, 'test.json'), 'w') as file:
-        json.dump(random.sample(test, 100), file)
+        json.dump(random.sample(test, 10), file)
     """
 
     
