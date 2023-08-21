@@ -429,6 +429,7 @@ class Nerf2vecTrainer:
 
         # psnrs_masked = []
         psnrs = []
+        psnrs_bg = []
         idx = 0
 
         print(f'Validating on {split} set')
@@ -479,8 +480,10 @@ class Nerf2vecTrainer:
                 
                 fg_mse = F.mse_loss(rgb, pixels) * config.FG_WEIGHT
                 bg_mse = F.mse_loss(bg_rgb_pred, bg_rgb_label) * config.BG_WEIGHT
+                
 
                 """
+                # DYNAMIC WEIGHT
                 bg_mse = F.smooth_l1_loss(bg_rgb_pred, bg_rgb_label, reduction='none')
                 bg_weights = get_bg_weight(n_true_coordinates).cuda()
                 bg_weights = bg_weights.unsqueeze(1).unsqueeze(2) 
@@ -493,18 +496,24 @@ class Nerf2vecTrainer:
                 fg_mse = torch.mean(fg_mse)
                 """
 
-                mse = fg_mse + bg_mse
+                mse_bg = fg_mse + bg_mse
+                mse = F.mse_loss(rgb, pixels)
             
             psnr = -10.0 * torch.log(mse) / np.log(10.0)
             psnrs.append(psnr.item())
+
+            psnr_bg = -10.0 * torch.log(mse_bg) / np.log(10.0)
+            psnrs_bg.append(psnr_bg.item())
 
             if idx > 99:
                 break
             idx+=1
         
         mean_psnr = sum(psnrs) / len(psnrs)
+        mean_psnr_bg = sum(psnrs_bg) / len(psnrs_bg)
 
         self.logfn({f'{split}/PSNR': mean_psnr})
+        self.logfn({f'{split}/PSNR_BG': mean_psnr_bg})
         
         if split == 'validation' and mean_psnr > self.best_psnr:
             self.best_psnr = mean_psnr
