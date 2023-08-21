@@ -363,7 +363,7 @@ class Nerf2vecTrainer:
                     fg_loss = torch.mean(fg_loss)
                     """
                     
-                    print(fg_loss, bg_loss)
+                    # print(fg_loss, bg_loss)
 
                     loss = fg_loss + bg_loss
                     
@@ -403,12 +403,11 @@ class Nerf2vecTrainer:
                     print(f'Completed {batch_idx} batches in {batch_end-batch_start}s')
 
             if (epoch > 0 and epoch % 10 == 0) or epoch == num_epochs - 1:
-                # print()
                 self.val(split='train')
-                #self.val(split='validation')
+                self.val(split='validation')
 
                 self.plot(split='train')
-                #self.plot(split='validation')
+                self.plot(split='validation')
 
                 
             if epoch % 50 == 0:
@@ -588,13 +587,12 @@ class Nerf2vecTrainer:
                                 grid_weights=None
                 )
                 
-                pred_image_2=wandb.Image((rgb_A.to('cpu').detach().numpy() * 255).astype(np.uint8))
-                pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
                 gt_image = wandb.Image((pixels.to('cpu').detach().numpy()[idx] * 255).astype(np.uint8))
+                pred_image_grid = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
+                pred_image_no_grid = wandb.Image((rgb_A.to('cpu').detach().numpy() * 255).astype(np.uint8))
 
-                self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image, pred_image_2]})
+                self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image_grid, pred_image_no_grid]})
                                 
-                
                 """
                 img_name = str(uuid.uuid4())
                 plots_path = 'plots'
