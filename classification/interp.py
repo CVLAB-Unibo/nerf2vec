@@ -63,7 +63,7 @@ def interpolate():
     decoder = decoder.cuda()
     decoder.eval()
 
-    dset_json = os.path.abspath(os.path.join('data', 'validation.json'))  
+    dset_json = os.path.abspath(os.path.join('data', 'train.json'))  
     dset = NeRFDataset(dset_json, device='cpu')  
    
     while True:
@@ -76,6 +76,8 @@ def interpolate():
             idx_B = randint(0, len(dset) - 1)
             train_nerf_B, test_nerf_B, matrices_unflattened_B, matrices_flattened_B, _, data_dir_B, _, _ = dset[idx_B]
             class_id_B = get_class_label_from_nerf_root_path(data_dir_B)
+        
+        print(data_dir_A, data_dir_B)
         
         matrices_flattened_A = matrices_flattened_A.cuda().unsqueeze(0)
         matrices_flattened_B = matrices_flattened_B.cuda().unsqueeze(0)
@@ -113,19 +115,15 @@ def interpolate():
                     )
             
             plots_path = 'plots_interp'
-            img_name = str(uuid.uuid4())
-            img_name += f'{idx}_{img_name}.png'
+            img_name = f'{idx}_{str(uuid.uuid4())}.png'
             
             imageio.imwrite(
-                        os.path.join(plots_path, f'{img_name}.png'),
+                        os.path.join(plots_path,img_name),
                         (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8)
                     )
 
             renderings.append(rgb)
 
 
-        pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
-
-        
-
+        # pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
         # self.logfn({f"{split}/nerf_{idx}": [gt_image, pred_image]})
