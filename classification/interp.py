@@ -63,10 +63,13 @@ def interpolate():
     decoder = decoder.cuda()
     decoder.eval()
 
-    dset_json = os.path.abspath(os.path.join('data', 'train.json'))  
+    split = 'train'
+    dset_json = os.path.abspath(os.path.join('data', f'{split}.json'))  
     dset = NeRFDataset(dset_json, device='cpu')  
+
+    idx = 0
    
-    while True:
+    while idx < 1000:
         idx_A = randint(0, len(dset) - 1)
         train_nerf_A, test_nerf_A, matrices_unflattened_A, matrices_flattened_A, grid_weights_A, data_dir_A, _, _ = dset[idx_A]
         class_id_A = get_class_label_from_nerf_root_path(data_dir_A)
@@ -99,7 +102,11 @@ def interpolate():
         rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
         color_bkgds = color_bkgds.cuda()
 
-        renderings = []
+        # renderings = []
+
+        plots_path = f'plots_interp_{split}'
+        curr_folder_path = os.path.join(plots_path, str(uuid.uuid4()))    
+        os.makedirs(curr_folder_path, exist_ok=True)
 
         for idx in range(len(embeddings)):
             with autocast():
@@ -114,15 +121,20 @@ def interpolate():
                         grid_weights=None
                     )
             
-            plots_path = 'plots_interp'
-            img_name = f'{idx}_{str(uuid.uuid4())}.png'
+            
+           
+            
+            img_name = f'{idx}.png'
+            full_path = os.path.join(curr_folder_path, img_name)
             
             imageio.imwrite(
-                        os.path.join(plots_path,img_name),
+                        full_path,
                         (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8)
                     )
+        
+        idx += 1
 
-            renderings.append(rgb)
+            # renderings.append(rgb)
 
 
         # pred_image = wandb.Image((rgb.to('cpu').detach().numpy()[0] * 255).astype(np.uint8)) 
