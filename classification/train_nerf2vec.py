@@ -83,7 +83,7 @@ class NeRFDataset(Dataset):
         n_total_cells = 884736
         grid_weights['occs'] = torch.empty([n_total_cells])   # 884736 if resolution == 96 else 2097152
         
-        N = 30000
+        N = 32000
         background_indices, n_true_coordinates = self._sample_unoccupied_cells(N, grid_weights['_binary'], data_dir, n_total_cells)
 
         return train_nerf, test_nerf, matrix_unflattened, matrix_flattened, grid_weights, data_dir, background_indices, n_true_coordinates
@@ -249,7 +249,7 @@ class Nerf2vecTrainer:
         
         self.epoch = 0
         self.global_step = 0
-        self.best_psnr = float("inf")
+        self.best_psnr = float("-inf")
 
         self.ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
         self.all_ckpts_path = Path(os.path.join('classification', 'train', 'all_ckpts'))

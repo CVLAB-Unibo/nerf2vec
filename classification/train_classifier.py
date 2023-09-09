@@ -44,15 +44,17 @@ class InrEmbeddingDataset(Dataset):
             class_id = np.array(f.get("class_id"))
             class_id = torch.from_numpy(class_id).long()
             
+            """
             data_dir = f["data_dir"][()].decode("utf-8")
             weights_file_path = os.path.join(data_dir, config.NERF_WEIGHTS_FILE_NAME)
 
             mlp_params = torch.load(weights_file_path, map_location=torch.device('cpu'))# ['mlp_base.params']
             mlp_matrix = get_mlp_params_as_matrix(mlp_params['mlp_base.params'])
+            """
             
 
-        # return embedding, class_id
-        return mlp_params['mlp_base.params'], class_id
+        return embedding, class_id
+        # return mlp_params['mlp_base.params'], class_id
     
 class InrEmbeddingClassifier:
     def __init__(self, device='cuda:0') -> None:

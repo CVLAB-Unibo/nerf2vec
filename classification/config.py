@@ -33,7 +33,7 @@ FG_WEIGHT = 1 - BG_WEIGHT
 # ####################
 """
 #
-# GRIDd
+# GRID
 #
 import os
 from nerfacc import ContractionType
@@ -48,7 +48,7 @@ GRID_RECONSTRUCTION_WARMUP_ITERATIONS = 5
 #
 # RAYS
 #
-NUM_RAYS = 50000
+NUM_RAYS = 55000
 
 #
 # INSTANT-NGP 

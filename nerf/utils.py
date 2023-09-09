@@ -99,8 +99,6 @@ def render_image(
                     # occupancy_grid = None
                     occupancy_grid.load_state_dict(dict)
 
-
-                
                 ray_indices, t_starts, t_ends = ray_marching(
                     chunk_rays.origins[batch_idx],  
                     chunk_rays.viewdirs[batch_idx], 
@@ -595,6 +593,10 @@ def sample_pixels_uniformly(opacities, colors, max_elements):
     true_indices =  torch.nonzero(opacities.squeeze()).squeeze()
     if len(true_indices) < max_elements:
         print('true_indices < max_elements')
+        n_missing_elements = max_elements - len(true_indices)
+        
+        true_indices_pad = true_indices[-n_missing_elements:]
+        true_indices = torch.cat((true_indices, true_indices_pad), dim=0)
 
     """
     mask = ~torch.isin(all_indices, true_indices)
