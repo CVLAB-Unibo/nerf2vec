@@ -19,6 +19,7 @@ LABELS_TO_IDS = {
     "04530566": 12   # watercraft
 }
 
+BASELINE_DIR = os.path.join('data', 'baseline_classifier_renderings')
 EMBEDDINGS_DIR = os.path.join('classification', 'embeddings')
 TRAIN_SPLIT = 'train'
 VAL_SPLIT = 'val'
@@ -49,6 +50,9 @@ DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP = base_config.DECODER_NUM_HIDDEN_LAYERS_AFT
 DECODER_OUT_DIM = base_config.DECODER_OUT_DIM
 INSTANT_NGP_ENCODING_CONF = base_config.INSTANT_NGP_ENCODING_CONF
 GRID_AABB = base_config.GRID_AABB
+GRID_RESOLUTION = base_config.GRID_RESOLUTION
+GRID_CONTRACTION_TYPE = base_config.GRID_CONTRACTION_TYPE
+INSTANT_NGP_MLP_CONF = base_config.INSTANT_NGP_MLP_CONF
 
 # TODO: complete this dictionary
 WANDB_CONFIG = {

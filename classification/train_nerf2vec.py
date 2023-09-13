@@ -74,16 +74,17 @@ class NeRFDataset(Dataset):
             'color_bkgd': test_color_bkgd
         }
 
-        matrix_unflattened = torch.load(nerf_loader.weights_file_path, map_location=torch.device(self.device))
-        matrix_flattened = get_mlp_params_as_matrix(matrix_unflattened['mlp_base.params'])
+        # TODO: refactor these variable names
+        matrix_unflattened = torch.load(nerf_loader.weights_file_path, map_location=torch.device(self.device))  # The NeRF weights obtained from NerfAcc
+        matrix_flattened = get_mlp_params_as_matrix(matrix_unflattened['mlp_base.params'])  # The NeRF weights with proper padding
 
         grid_weights_path = os.path.join(data_dir, 'grid.pth')  
         grid_weights = torch.load(grid_weights_path, map_location=self.device)
         grid_weights['_binary'] = grid_weights['_binary'].to_dense()#.unsqueeze(dim=0)
-        n_total_cells = 884736
+        n_total_cells = 884736  # TODO: add this as config parameter
         grid_weights['occs'] = torch.empty([n_total_cells])   # 884736 if resolution == 96 else 2097152
         
-        N = 32000
+        N = 32000  # TODO: add this as config parameter
         background_indices, n_true_coordinates = self._sample_unoccupied_cells(N, grid_weights['_binary'], data_dir, n_total_cells)
 
         return train_nerf, test_nerf, matrix_unflattened, matrix_flattened, grid_weights, data_dir, background_indices, n_true_coordinates
@@ -271,9 +272,16 @@ class Nerf2vecTrainer:
         num_epochs = config.NUM_EPOCHS
         start_epoch = self.epoch
 
-        # self.plot2('train')
-        # self.val('train')
-        # exit()
+        """
+        ckpt_names = ['0.pt', '100.pt', '200.pt', '300.pt', '400.pt', '500.pt', '600.pt', '700.pt']
+
+        for ck in ckpt_names:
+            self.restore_ckpt(ck)
+            self.plot2('train')
+            self.plot2('val')
+            # self.val('train')
+        exit()
+        """
 
         for epoch in range(start_epoch, num_epochs):
 
@@ -614,6 +622,7 @@ class Nerf2vecTrainer:
                     os.path.join(plots_path, f'{img_name}.png'),
                     (rgb_A.numpy() * 255).astype(np.uint8)
                 )"""
+    
     """
     @torch.no_grad()
     def plot2(self, split: str) -> None:
@@ -633,7 +642,8 @@ class Nerf2vecTrainer:
 
         batch = next(loader_iter)
 
-        with open('0.2bg_weight.txt', 'a') as f:
+        with open(f'{split}_{self.epoch}ep_PSNR.txt', 'a') as f:
+            n_nerfs = 0
 
             while batch:
                 _, test_nerf, matrices_unflattened, matrices_flattened, grid_weights, data_dir, _, _ = batch
@@ -750,6 +760,13 @@ class Nerf2vecTrainer:
                     batch = next(loader_iter)
                 except StopIteration:
                     batch = None
+
+                n_nerfs += 1
+                print(f'processed: {n_nerfs * config.BATCH_SIZE} NeRFs')
+
+                if n_nerfs >= 30:
+                    break
+
         
             print(f'mean PSRN: {sum(psnrs) / len(psnrs)}')
             print(f'mean PSRN (no BG): {sum(psnrs_no_bg) / len(psnrs_no_bg)}')
@@ -757,7 +774,7 @@ class Nerf2vecTrainer:
             f.write('\n')
             f.write(f'mean PSRN: {sum(psnrs) / len(psnrs)}\n')
             f.write(f'mean PSRN (no BG): {sum(psnrs_no_bg) / len(psnrs_no_bg)}')
-     """           
+    """          
             
     def save_ckpt(self, best: bool = False, all: bool = False) -> None:
         ckpt = {
@@ -803,6 +820,23 @@ class Nerf2vecTrainer:
             self.optimizer.load_state_dict(ckpt["optimizer"])
 
             # self.optimizer.param_groups[0]['lr'] = 1e-2
+    
+    """
+    def restore_ckpt(self, name) -> None:
+        ckpt_path = os.path.join(self.all_ckpts_path, name)
+        print(f'loading weights: {ckpt_path}')
+        ckpt = torch.load(ckpt_path)
+
+        self.epoch = ckpt["epoch"] + 1
+        self.global_step = self.epoch * len(self.train_loader)
+        self.best_psnr = ckpt["best_psnr"]
+
+        self.encoder.load_state_dict(ckpt["encoder"])
+        self.decoder.load_state_dict(ckpt["decoder"])
+        self.optimizer.load_state_dict(ckpt["optimizer"])
+
+            # self.optimizer.param_groups[0]['lr'] = 1e-2
+    """
     
     def config_wandb(self):
         wandb.init(
