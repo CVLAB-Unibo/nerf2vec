@@ -68,7 +68,7 @@ def render_image(
     chunk = (
         torch.iinfo(torch.int32).max
         if radiance_field.training or batch_size > 1
-        else 2048
+        else 1024
     )
     
     MAX_SIZE = 25000  # Desired maximum size  # TODO: add a configuration variable

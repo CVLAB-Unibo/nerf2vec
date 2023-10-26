@@ -1,3 +1,4 @@
+import datetime
 import json
 import math
 import os
@@ -5,9 +6,10 @@ import time
 from nerfacc import OccupancyGrid
 import torch
 from torch.utils.data import DataLoader, Dataset
+import wandb
 
 from classification import config_classifier as config
-from classification.create_renderings import get_rays
+from classification.export_renderings import get_rays
 from classification.utils import get_mlp_params_as_matrix
 from models.baseline_classifier import Resnet50Classifier
 from models.encoder import Encoder
@@ -56,7 +58,8 @@ class NeRFWeightsDataset(Dataset):
     def __getitem__(self, index) -> Any:
 
         data_dir = self.nerf_paths[index]
-        weights_file_path = 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth'
+        weights_file_name = 'bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth'
+        weights_file_path = os.path.join(data_dir, weights_file_name)
 
         matrix_unflattened = torch.load(weights_file_path, map_location=torch.device(self.device))  # The NeRF weights obtained from NerfAcc
         matrix_flattened = get_mlp_params_as_matrix(matrix_unflattened['mlp_base.params'])  # The NeRF weights with proper padding
@@ -73,6 +76,8 @@ class NeRFWeightsDataset(Dataset):
 
 @torch.no_grad()
 def evaluate_nerf2vec_classification(device='cuda:0'):
+
+    config_wandb()
 
     # DATASET
     val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))  
@@ -112,40 +117,54 @@ def evaluate_nerf2vec_classification(device='cuda:0'):
     # EVALUATION
     encoding_times = []
     classification_times = []
+
     for batch_idx, batch in enumerate(val_loader):
         matrix_unflattened, matrix_flattened, grid_weights, data_dir = batch
+        matrix_flattened = matrix_flattened.cuda()
         
         start = time.time()
         embeddings = encoder(matrix_flattened)
         end = time.time()
         encoding_times.append(end-start)
+        logfn({"encoding_time": end-start}, batch_idx)
 
         start = time.time()
         pred = classifier(embeddings)
         end = time.time()
         classification_times.append(end-start)
+        logfn({"classification_time": end-start}, batch_idx)
     
     average_encoding_time = sum(encoding_times) / len(encoding_times)
     average_classification_time = sum(classification_times) / len(classification_times)
 
+    logfn({f'average_encoding_time': average_encoding_time}, batch_idx+1)
+    logfn({f'average_classification_time': average_classification_time}, batch_idx+1)
+    logfn({f'total_time': sum(encoding_times)+sum(classification_times)}, batch_idx+1)
+
     print(f'average_encoding_time: {average_encoding_time}s')
     print(f'average_classification_time: {average_classification_time}s')
+    print(f'total average time: {sum(encoding_times)+sum(classification_times)}s')
+    print(f'total NeRFs: {len(encoding_times)}')
+
+    
 
 
 def generate_image(radiance_field, radiance_field_weights, device, occupancy_grid, grid_weights, scene_aabb, render_step_size, bkgd):
     
-    ngp_mlp_weights = torch.load(radiance_field_weights, map_location=torch.device(device))
-    radiance_field.load_state_dict(ngp_mlp_weights)
+    # ngp_mlp_weights = torch.load(radiance_field_weights, map_location=torch.device(device))
+    radiance_field.load_state_dict(radiance_field_weights)
     
     if not grid_weights:
         occupancy_grid = None
     else:
+        """
         grid_weights['_binary'] = grid_weights['_binary'].to_dense()
         n_total_cells = 884736  # TODO: add this as config parameter
         grid_weights['occs'] = torch.empty([n_total_cells])   # 884736 if resolution == 96 else 2097152
+        """
         occupancy_grid.load_state_dict(grid_weights)
 
-    rays = get_rays()
+    rays = get_rays(device)
     rays_shape = rays.origins.shape
     height, width, _ = rays_shape
     num_rays = height * width
@@ -166,7 +185,8 @@ def generate_image(radiance_field, radiance_field_weights, device, occupancy_gri
         
         return radiance_field(positions, t_dirs)
     
-    chunk = 4096
+    # chunk = 8192
+    chunk = 200000
     results = []
 
     for i in range(0, num_rays, chunk):
@@ -200,13 +220,15 @@ def generate_image(radiance_field, radiance_field_weights, device, occupancy_gri
         for r in zip(*results)
     ]
 
-    rgbs = rgbs.view((*rays_shape[:-1], -1))
+    rgbs = rgbs.view((*rays_shape[:-1], -1)).permute(2, 0, 1).float() # / 255.0
+    
     return rgbs
     
-        
-
 @torch.no_grad()
-def evaluate_baseline_classification(device='device', use_occupancy_grid=False):
+def evaluate_baseline_classification(device='cuda:0', use_occupancy_grid=False):
+
+    config_wandb()
+
     # DATASET
     val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))  
     val_dset = NeRFWeightsDataset(val_dset_json, device='cpu')   
@@ -249,27 +271,60 @@ def evaluate_baseline_classification(device='device', use_occupancy_grid=False):
     classifier.load_state_dict(ckpt["net"])
 
     # EVALUATION
-    rendering_times = []
+    encoding_times = []
     classification_times = []
     for batch_idx, batch in enumerate(val_loader):
         matrix_unflattened, matrix_flattened, grid_weights, data_dir = batch
-
+        # matrix_unflattened = matrix_unflattened.cuda()
+        
+        curr_ngp_mlp_weights = {
+            'mlp_base.params': matrix_unflattened['mlp_base.params'][0]
+        }
+        curr_grid_weights = {
+            '_roi_aabb': grid_weights['_roi_aabb'][0],
+            '_binary': grid_weights['_binary'][0],
+            'resolution': grid_weights['resolution'][0],
+            'occs': grid_weights['occs'][0],
+        }
+    
         if not use_occupancy_grid:
-            grid_weights = None
+            curr_grid_weights = None
+        
         
         start = time.time()
-        image = generate_image(radiance_field, matrix_unflattened, device, occupancy_grid, grid_weights, scene_aabb, render_step_size, bkgd)
+        image = generate_image(radiance_field, curr_ngp_mlp_weights, device, occupancy_grid, curr_grid_weights, scene_aabb, render_step_size, bkgd)
+        image = image.unsqueeze(0)
         end = time.time()
-        rendering_times.append(end-start)
+        encoding_times.append(end-start)
+        logfn({"encoding_time": end-start}, batch_idx)
 
         start = time.time()
         pred = classifier(image)
         end = time.time()
         classification_times.append(end-start)
+        logfn({"classification_time": end-start}, batch_idx)
     
-    average_rendering_time = sum(rendering_times) / len(rendering_times)
+    average_encoding_time = sum(encoding_times) / len(encoding_times)
     average_classification_time = sum(classification_times) / len(classification_times)
 
-    print(f'average_rendering_time: {average_rendering_time}s')
+    logfn({f'average_encoding_time': average_encoding_time}, batch_idx+1)
+    logfn({f'average_classification_time': average_classification_time}, batch_idx+1)
+    logfn({f'total_time': sum(encoding_times)+sum(classification_times)}, batch_idx+1)
+
+    print(f'average_encoding_time: {average_encoding_time}s')
     print(f'average_classification_time: {average_classification_time}s')
+    print(f'total average time: {sum(encoding_times)+sum(classification_times)}s')
+    print(f'total NeRFs: {len(encoding_times)}')
+
+    
+def config_wandb():
+    wandb.init(
+        entity='dsr-lab',
+        project='nerf2vec-evaluation',
+        name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
+        config=config.WANDB_CONFIG
+    )
+
+def logfn(values: Dict[str, Any], step) -> None:
+        wandb.log(values, step=step, commit=False)
 

@@ -153,7 +153,7 @@ def nerf2vec_baseline_comparisons(
         render_step_size,
         curr_folder_path,
         device):
-    
+
     # #########################
     # nerf2vec EMBEDDINGS
     # #########################
@@ -178,9 +178,10 @@ def nerf2vec_baseline_comparisons(
             (rgb.cpu().detach().numpy()[0] * 255).astype(np.uint8)
         )
 
-    # #########################
-    # BASELINE
-    # #########################
+    # ##################################################
+    # BASELINE (direct interpolation of NeRF weights)
+    # ##################################################
+    """
     ngp_weights = [{'mlp_base.params':matrices_unflattened_A}]
     for gamma in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
         emb_interp = (1 - gamma) * matrices_unflattened_A + gamma * matrices_unflattened_B
@@ -198,6 +199,7 @@ def nerf2vec_baseline_comparisons(
             color_bkgds,
             full_path
         )
+    """
 
 
 # TODO: a couple of new tasks has been added, without being very well structured in the current module.
@@ -246,12 +248,12 @@ def interpolate():
     decoder = decoder.cuda()
     decoder.eval()
 
-    split = 'train'
+    split = 'validation'
     dset_json = os.path.abspath(os.path.join('data', f'{split}.json'))  
     dset = NeRFDataset(dset_json, device='cpu')  
 
     n_images = 0
-    max_images = 80
+    max_images = 100
     
     while n_images < max_images:
         idx_A = randint(0, len(dset) - 1)
@@ -296,6 +298,7 @@ def interpolate():
         rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
         color_bkgds = color_bkgds.cuda()
         
+        # Interpolation
         nerf2vec_baseline_comparisons(
             rays, 
             color_bkgds, 
@@ -305,10 +308,12 @@ def interpolate():
             decoder,
             scene_aabb,
             render_step_size,
-            curr_folder_path
+            curr_folder_path,
+            device
         )
 
-        
+        """
+        # 3D shape consistency 
         render_with_multiple_camera_poses(
             device, 
             embeddings, 
@@ -317,5 +322,6 @@ def interpolate():
             scene_aabb, 
             render_step_size, 
             color_bkgds)
+        """
         
         n_images += 1

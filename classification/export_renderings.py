@@ -1,9 +1,6 @@
-# 1) Read train/validation/test json files
-# 2) For each file, load the NeRF weights
-# 3) Decide a (fixed) camera pose
-# 4) Create the images by naming them directly with {NeRF_id}_{class_name}.png
-# 5) Save these images all in the same plain folders (train/validation/test)
-# 6) While creating batches for training, process the file name for extracting the labels
+"""
+Module used to export renderings to train baseline classifiers based on ResNet50
+"""
 
 import json
 import math
@@ -13,6 +10,7 @@ from classification import config_classifier as config
 from classification.export_embeddings import find_duplicate_folders
 from classification.utils import generate_rays, pose_spherical
 from nerf.utils import namedtuple_map
+from nerf.loader_gt import _load_renderings
 from nerf.intant_ngp import NGPradianceField
 from nerfacc import OccupancyGrid, ray_marching, rendering
 import torch
@@ -145,7 +143,183 @@ def process_split(
         if n_generated_images % 500 == 0:
             print(f'{split} split: {n_generated_images}/{len(nerf_paths)}')
 
-def create_baseline_renderings():
+"""
+def generate_rays(c2w, WIDTH, HEIGHT, K, device):
+
+    OPENGL_CAMERA = True
+
+    x, y = torch.meshgrid(
+        torch.arange(WIDTH, device=device),
+        torch.arange(HEIGHT, device=device),
+        indexing="xy",
+    )
+    x = x.flatten()
+    y = y.flatten()
+
+    camera_dirs = F.pad(
+        torch.stack(
+            [
+                (x - self.K[0, 2] + 0.5) / self.K[0, 0],
+                (y - self.K[1, 2] + 0.5)
+                / self.K[1, 1]
+                * (-1.0 if OPENGL_CAMERA else 1.0),
+            ],
+            dim=-1,
+        ),
+        (0, 1),
+        value=(-1.0 if OPENGL_CAMERA else 1.0),
+    )  # [num_rays, 3]
+
+    directions = (camera_dirs[:, None, :] * c2w[:, :3, :3]).sum(dim=-1)
+    origins = torch.broadcast_to(c2w[:, :3, -1], directions.shape)
+    viewdirs = directions / torch.linalg.norm(
+        directions, dim=-1, keepdims=True
+    )
+
+    origins = torch.reshape(origins, (HEIGHT, WIDTH, 3))
+    viewdirs = torch.reshape(viewdirs, (HEIGHT, WIDTH, 3))
+
+    rays = Rays(origins=origins, viewdirs=viewdirs)
+
+    return rays
+"""
+
+def process_split_multiple_poses(
+        split,
+        nerf_paths, 
+        radiance_field,
+        occupancy_grid,
+        device,
+        rays,
+        scene_aabb,
+        render_step_size,
+        bkgd,
+        ngp_mlp_weights_file_name: str = "bb07_steps3000_encodingFrequency_mlpFullyFusedMLP_activationReLU_hiddenLayers3_units64_encodingSize24.pth",
+        grid_file_name: str = "grid.pth",
+        rendering_path: str = 'baseline_classifier_renderings_multi_poses'):
+
+    # Create directories if required
+    split_path = os.path.join(rendering_path, split)
+    os.makedirs(split_path, exist_ok=True)
+    
+    """
+    with open('folders_to_skip2.json', 'r') as f:
+        folders_to_skip = json.load(f)
+    """
+    folders_to_skip = {}
+
+    n_processed_nerfs = 0
+    n_skipped_folders = 0
+
+
+
+    for data_dir in nerf_paths:
+
+        folder_to_check = f"{data_dir.split('/')[-2]}_{data_dir.split('/')[-1]}"
+        if folder_to_check in folders_to_skip:
+            n_skipped_folders += 1
+            continue
+        
+        WIDTH = 224
+        HEIGHT = 224
+        camtoworlds, focal = _load_renderings(data_dir, 'train', HEIGHT, WIDTH)
+
+        ngp_mlp_weights_file_path = os.path.join(data_dir, ngp_mlp_weights_file_name)
+        ngp_mlp_weights = torch.load(ngp_mlp_weights_file_path, map_location=torch.device(device))
+        radiance_field.load_state_dict(ngp_mlp_weights)
+        
+        grid_weights_path = os.path.join(data_dir, grid_file_name) 
+        grid_weights = torch.load(grid_weights_path, map_location=device)
+        
+        grid_weights['_binary'] = grid_weights['_binary'].to_dense()
+        n_total_cells = 884736  # TODO: add this as config parameter
+        grid_weights['occs'] = torch.empty([n_total_cells])   # 884736 if resolution == 96 else 2097152
+        occupancy_grid.load_state_dict(grid_weights)
+
+        
+
+        def sigma_fn(t_starts, t_ends, ray_indices):
+            t_origins = chunk_rays.origins[ray_indices]
+            t_dirs = chunk_rays.viewdirs[ray_indices]
+            positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+            
+            _, density = radiance_field._query_density_and_rgb(positions, None)
+            return density
+
+        def rgb_sigma_fn(t_starts, t_ends, ray_indices):
+            t_origins = chunk_rays.origins[ray_indices]
+            t_dirs = chunk_rays.viewdirs[ray_indices]
+            positions = t_origins + t_dirs * (t_starts + t_ends) / 2.0
+            
+            return radiance_field(positions, t_dirs)
+        
+        # chunk = 4096
+        chunk = 200000
+
+        for pose_idx, c2w in enumerate(camtoworlds):
+
+            results = []
+
+            # Generate rays
+            c2w = torch.tensor(camtoworlds[pose_idx], device=device, dtype=torch.float32)
+            rays = generate_rays(device, WIDTH, HEIGHT, focal, c2w)
+
+            rays_shape = rays.origins.shape
+            height, width, _ = rays_shape
+            num_rays = height * width
+            rays_reshaped = namedtuple_map(lambda r: r.reshape([num_rays] + list(r.shape[2:])), rays)
+
+            for i in range(0, num_rays, chunk):
+                chunk_rays = namedtuple_map(lambda r: r[i : i + chunk], rays_reshaped)
+                ray_indices, t_starts, t_ends = ray_marching(
+                    chunk_rays.origins,
+                    chunk_rays.viewdirs,
+                    scene_aabb=scene_aabb,
+                    grid=occupancy_grid,
+                    sigma_fn=sigma_fn,
+                    near_plane=None,
+                    far_plane=None,
+                    render_step_size=render_step_size,
+                    stratified=radiance_field.training,
+                    cone_angle=0.0,
+                    alpha_thre=0.0,
+                )
+                rgb, opacity, depth = rendering(
+                    t_starts,
+                    t_ends,
+                    ray_indices,
+                    n_rays=chunk_rays.origins.shape[0],
+                    rgb_sigma_fn=rgb_sigma_fn,
+                    render_bkgd=bkgd,
+                )
+                chunk_results = [rgb, opacity, depth, len(t_starts)]
+                results.append(chunk_results)
+
+            rgbs, _, _, _ = [
+                torch.cat(r, dim=0) if isinstance(r[0], torch.Tensor) else r
+                for r in zip(*results)
+            ]
+
+            rgbs = rgbs.view((*rays_shape[:-1], -1))
+            
+            data_dir_splitted = data_dir.split('/')
+            img_name = f'{data_dir_splitted[-2]}_{data_dir_splitted[-1]}_{pose_idx}.png'
+            img_path = os.path.join(split_path, img_name)
+            imageio.imwrite(
+                img_path,
+                (rgbs.cpu().detach().numpy() * 255).astype(np.uint8)
+            )
+
+        n_processed_nerfs+=1
+        if n_processed_nerfs % 1000 == 0:
+            print(f'{split} split: {n_processed_nerfs}/{len(nerf_paths)}')
+        
+        # if n_processed_nerfs == 2:
+        #    break
+    
+    print(f'Skipped {n_skipped_folders} in {split} split')
+
+def export_baseline_renderings():
     device = 'cuda:0'
     train_nerf_paths = read_json('train')
     validation_nerf_paths = read_json('validation')
@@ -176,13 +350,13 @@ def create_baseline_renderings():
     
     bkgd = torch.zeros(3, device=device)
 
-    splits = ['train', 'validation', 'test']
+    splits = ['train', 'val', 'test']
     nerf_paths = [train_nerf_paths, validation_nerf_paths, test_nerf_paths]
     for i in range(len(splits)):
         split = splits[i]
         nerf_path = nerf_paths[i]
         
-        process_split(
+        process_split_multiple_poses(
             split, 
             nerf_path, 
             radiance_field, 
@@ -251,8 +425,6 @@ def clear_baseline_renderings():
                 print(f'from {curr_file_path} to {new_file_path}')
                 shutil.move(curr_file_path, new_file_path)
                 total += 1
-            
-            
     
     print(total)
     

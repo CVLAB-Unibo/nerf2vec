@@ -1,10 +1,15 @@
 import os
 import sys
+from classification.export_renderings import clear_baseline_renderings, export_baseline_renderings
+from classification.interp import interpolate
+from classification.retrieval import do_retrieval
+from classification.train_baseline_classifier import BaselineClassifier
 
 from classification.train_nerf2vec import Nerf2vecTrainer
 from dataset.generate_grids import start_grids_generation
 from classification.export_embeddings import export_embeddings
 from classification.train_classifier import InrEmbeddingClassifier
+from evaluation.evaluation import evaluate_baseline_classification, evaluate_nerf2vec_classification
 
 def train_nerf2vec():
     nerf2vec = Nerf2vecTrainer()
@@ -13,6 +18,9 @@ def train_nerf2vec():
 def train_classifier():
     classifier = InrEmbeddingClassifier()
     classifier.train()
+
+def interpolate_embeddings():
+    interpolate()
 
 def generate_grids():
 
@@ -45,3 +53,17 @@ if __name__ == '__main__':
     # generate_grids()
     # export_embeddings()
     # train_classifier()
+    # interpolate()
+
+    # export_baseline_renderings()
+    # clear_baseline_renderings()
+    
+    
+    # baseline_classifier = BaselineClassifier()
+    # baseline_classifier.train()
+    # baseline_classifier.val("val")
+
+    # evaluate_nerf2vec_classification()
+    # evaluate_baseline_classification()
+
+    # do_retrieval()
