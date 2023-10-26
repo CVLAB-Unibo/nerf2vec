@@ -8,7 +8,7 @@ import torch
 import collections
 import torch.nn.functional as F
 
-from nerfacc import OccupancyGrid, ray_marching, render_visibility, rendering
+from nerfacc import OccupancyGrid, contract_inv, ray_marching, render_visibility, rendering
 
 Rays = collections.namedtuple("Rays", ("origins", "viewdirs"))
 
@@ -38,7 +38,8 @@ def render_image(
     render_bkgd: Optional[torch.Tensor] = None,  
     cone_angle: float = 0.0,
     alpha_thre: float = 0.0,
-    grid_weights:dict = None
+    grid_weights:dict = None,
+    background_indices = None
 ):
     """Render the pixels of an image."""
 
@@ -67,10 +68,10 @@ def render_image(
     chunk = (
         torch.iinfo(torch.int32).max
         if radiance_field.training or batch_size > 1
-        else 4096
+        else 1024
     )
     
-    MAX_SIZE = 20000  # Desired maximum size  # TODO: add a configuration variable
+    MAX_SIZE = 25000  # Desired maximum size  # TODO: add a configuration variable
 
     for i in range(0, num_rays, chunk):
         chunk_rays = namedtuple_map(lambda r: r[:, i : i + chunk], rays)
@@ -79,6 +80,7 @@ def render_image(
         b_t_starts = []
         b_t_ends = []
         b_ray_indices = []
+        max_bg_padding = 0
 
         # ####################
         # RAY MARCHING
@@ -86,8 +88,8 @@ def render_image(
         with torch.no_grad():
             
             for batch_idx in range(batch_size):
-                
-                if grid_weights != None:
+
+                if grid_weights != None and occupancy_grid != None:
                     dict = {
                         '_roi_aabb': grid_weights['_roi_aabb'][batch_idx],
                         '_binary': grid_weights['_binary'][batch_idx],
@@ -97,8 +99,6 @@ def render_image(
                     # occupancy_grid = None
                     occupancy_grid.load_state_dict(dict)
 
-                    
-                
                 ray_indices, t_starts, t_ends = ray_marching(
                     chunk_rays.origins[batch_idx],  
                     chunk_rays.viewdirs[batch_idx], 
@@ -127,18 +127,35 @@ def render_image(
             # l = []
             padding_masks = [None]*batch_size
 
-            
             if radiance_field.training or batch_size > 1:
                 
                 # stacked_tensor = torch.stack(b_positions, dim=0)
                 # MAX_SIZE, _ = torch.max(stacked_tensor, dim=0) 
 
                 for batch_idx in range(batch_size):
+                    
+                    if background_indices is not None:
+                        grid_coords = occupancy_grid.grid_coords[background_indices][batch_idx]
+                        bg_positions = (
+                            grid_coords + torch.rand_like(grid_coords, dtype=torch.float32)
+                        ) / occupancy_grid.resolution
+
+                        bg_positions = contract_inv(
+                            bg_positions,
+                            roi=occupancy_grid._roi_aabb,
+                            type=occupancy_grid._contraction_type,
+                        )
+                        # b_background_positions.append(bg_positions)
+
+                    
                     # l.append(b_positions[batch_idx].size(0))
                     # print(b_positions[batch_idx].size(0))
+                    # b_elements_before_padding.append(b_positions[batch_idx].size(0))
+
                     # PADDING
                     if b_positions[batch_idx].size(0) < MAX_SIZE:
                         
+                        """
                         # Define padding dimensions                        
                         initial_size = b_positions[batch_idx].size(0)
                         padding_size = MAX_SIZE - initial_size
@@ -156,13 +173,15 @@ def render_image(
                         # Create masks used for ignoring the padding
                         padding_masks[batch_idx] = torch.zeros(MAX_SIZE, dtype=torch.bool)
                         padding_masks[batch_idx][:initial_size] = True
+                        """
+                        pass
 
                     # TRUNCATION
                     else:
                         # ################################################################################
                         # NEW WAY
                         # ################################################################################       
-                        """
+                        '''
                         new_indices = torch.zeros(MAX_SIZE, dtype=torch.int32, device='cuda')
                         RATIO = MAX_SIZE/b_positions[batch_idx].size(0)
 
@@ -210,17 +229,17 @@ def render_image(
 
                         # new_values, new_counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
                         # assert torch.eq(values, new_values).all().item(), "ERROR"
-                        """                 
+                        '''                 
                         
                         # ################################################################################
                         # OLD WAY
                         # ################################################################################
-                        """
+                        '''
                         b_positions[batch_idx] = b_positions[batch_idx][:MAX_SIZE]
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][:MAX_SIZE]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][:MAX_SIZE]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][:MAX_SIZE]
-                        """
+                        '''
 
                         # ################################################################################
                         # FREQUENCY ORDER
@@ -228,7 +247,7 @@ def render_image(
                         # new_positions, new_indices = torch.sort(b_ray_indices[batch_idx], descending=True, stable=True)
                         # new_indices = new_indices[:MAX_SIZE]
 
-                        """
+                        '''
                         # Calculate the frequency of each value
                         values, counts = torch.unique(b_ray_indices[batch_idx], return_counts=True)
                         sorted_indices = torch.argsort(counts, descending=True)
@@ -242,7 +261,7 @@ def render_image(
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][new_indices]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][new_indices]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][new_indices]
-                        """
+                        '''
                         
                         
                         # ################################################################################
@@ -258,7 +277,35 @@ def render_image(
                         b_t_starts[batch_idx] = b_t_starts[batch_idx][indices]
                         b_t_ends[batch_idx] = b_t_ends[batch_idx][indices]
                         b_ray_indices[batch_idx] = b_ray_indices[batch_idx][indices]
+
+                        # indices = random.sample(range(0, len(b_positions[batch_idx].shape[0])), MAX_SIZE)
+                        # indices, _ = torch.sort(indices)  # This is important to avoid problem with volume rendering
+                    
+                    # ################################################################################
+                    # TEMP
+                    # ################################################################################
+                    
+                    if background_indices is not None:
+                        # bg_positions
+                        MAX_SIZE_WITH_BACKGRDOUND = MAX_SIZE + 10000
+                        initial_size = b_positions[batch_idx].size(0)
+                        padding_size = MAX_SIZE_WITH_BACKGRDOUND - initial_size
                         
+                        # b_positions[batch_idx] = F.pad(b_positions[batch_idx], pad=(0, 0, 0, padding_size), value=bg_positions[:padding_size])  
+                        b_positions[batch_idx] = torch.cat([b_positions[batch_idx], bg_positions[:padding_size]], dim=0)
+                        b_t_starts[batch_idx] = F.pad(b_t_starts[batch_idx], pad=(0, 0, 0, padding_size))
+                        b_t_ends[batch_idx] = F.pad(b_t_ends[batch_idx], pad=(0, 0, 0, padding_size))
+                        b_ray_indices[batch_idx] = F.pad(b_ray_indices[batch_idx], pad=(0, padding_size))
+                        
+                        # Create masks used for ignoring the padding
+                        padding_masks[batch_idx] = torch.zeros(MAX_SIZE_WITH_BACKGRDOUND, dtype=torch.bool)
+                        padding_masks[batch_idx][:initial_size] = True
+
+                        # Keep track of the largest tensor that contains the highest number of background coords
+                        if padding_size > max_bg_padding:
+                            max_bg_padding = padding_size
+                    
+                    
                         
                 # print(min(l), max(l))
             
@@ -273,7 +320,14 @@ def render_image(
         # VOLUME RENDERING
         # ####################
         curr_rgb, curr_sigmas = radiance_field(embeddings, b_positions)
+
+        bg_rgb_pred = torch.empty((batch_size, max_bg_padding, 3), device='cuda')  # TODO: refactor device
+        bg_rgb_label = torch.empty((batch_size, max_bg_padding, 3), device='cuda')  # TODO: refactor device
+
+        # bg_sigma_pred = torch.empty((batch_size, max_bg_padding, 1), device='cuda')  # TODO: refactor device
+        # bg_sigma_label = torch.empty((batch_size, max_bg_padding, 1), device='cuda')  # TODO: refactor device
         
+
         for curr_batch_idx in range(batch_size):
             
             curr_mask = padding_masks[curr_batch_idx]
@@ -293,6 +347,64 @@ def render_image(
                 results[curr_batch_idx].append(chunk_results)
             else:
                 results.append([chunk_results])
+        
+            # ################################################################################
+            # BACKGROUND MANAGEMENT
+            # ################################################################################
+            if curr_mask is not None:
+                inverted_mask = ~curr_mask
+                curr_bg_rgb_pred = curr_rgb[curr_batch_idx][inverted_mask]
+                curr_bg_sigma_pred = curr_sigmas[curr_batch_idx][inverted_mask]
+                
+                # Compute rgb and labels
+                # ################################################################################
+                # VERSION WITH RGBA
+                # ################################################################################
+                
+                # Background composition (refer to vol_rendering.py from NerfAcc)
+                curr_bg_rgb_pred = curr_bg_rgb_pred * curr_bg_sigma_pred + render_bkgd[curr_batch_idx].clone() * (1.0 - curr_bg_sigma_pred)
+                # curr_bg_rgb_pred = curr_bg_rgb_pred + render_bkgd[curr_batch_idx].clone() * (1.0 - curr_bg_sigma_pred)
+                curr_bg_rgb_label = render_bkgd[curr_batch_idx].repeat(curr_bg_rgb_pred.shape[0], 1)  # Version with RGBA
+
+                # Compute padding size
+                initial_size = curr_bg_rgb_pred.shape[0]
+                padding_size = max_bg_padding - initial_size
+                
+                # Add padding to rgb predictions
+                curr_bg_rgb_pred = F.pad(curr_bg_rgb_pred, pad=(0, 0, 0, padding_size))
+                bg_rgb_pred[curr_batch_idx] = curr_bg_rgb_pred
+
+                # Add padding to labels
+                curr_bg_rgb_label = F.pad(curr_bg_rgb_label, pad=(0, 0, 0, padding_size))
+                bg_rgb_label[curr_batch_idx] = curr_bg_rgb_label
+                
+                # ################################################################################
+
+                # ################################################################################
+                # VERSION WITH A ONLY
+                # ################################################################################
+                """
+                curr_bg_sigma_label = torch.zeros((curr_bg_sigma_pred.shape[0], 1))  # Version with only A
+
+                # Compute padding size
+                initial_size = curr_bg_sigma_pred.shape[0]
+                padding_size = max_bg_padding - initial_size
+                
+                # Add padding to alpha predictions
+                curr_bg_sigma_pred = F.pad(curr_bg_sigma_pred, pad=(0, 0, 0, padding_size))
+                bg_sigma_pred[curr_batch_idx] = curr_bg_sigma_pred
+
+                # Add padding to labels
+                curr_bg_sigma_label = F.pad(curr_bg_sigma_label, pad=(0, 0, 0, padding_size))
+                bg_sigma_label[curr_batch_idx] = curr_bg_sigma_label
+                """
+                # ################################################################################
+                
+
+                
+
+        # ################################################################################
+
             
     colors, opacities, depths, n_rendering_samples = zip(*[
         (
@@ -310,7 +422,7 @@ def render_image(
     n_rendering_samples = [sum(tensor) for tensor in n_rendering_samples] 
     
     return (
-        colors, opacities, depths, n_rendering_samples
+        colors, opacities, depths, n_rendering_samples, bg_rgb_pred, bg_rgb_label # bg_sigma_pred, bg_sigma_label # bg_rgb_pred, bg_rgb_label 
     )
 
 @torch.no_grad()
@@ -336,7 +448,7 @@ def render_image_GT(
     # ngp_mlp=None,
     device='cuda:0',
     training=True,
-    max_elements=1024
+    max_elements=512
 ):
     
     filtered_rays = rays
@@ -477,12 +589,20 @@ def sample_pixels_uniformly(opacities, colors, max_elements):
 
     # Get indices of True and False elements, where True means that the specified coordinate 
     # contains the 3d model, False otherwise.
-    all_indices = torch.tensor(range(len(opacities)), device=opacities.device)
+    # all_indices = torch.tensor(range(len(opacities)), device=opacities.device)
     true_indices =  torch.nonzero(opacities.squeeze()).squeeze()
+    if len(true_indices) < max_elements:
+        print('true_indices < max_elements')
+        n_missing_elements = max_elements - len(true_indices)
+        
+        true_indices_pad = true_indices[-n_missing_elements:]
+        true_indices = torch.cat((true_indices, true_indices_pad), dim=0)
+
+    """
     mask = ~torch.isin(all_indices, true_indices)
     false_indices = all_indices[mask]
 
-    PERCENTAGE = 50
+    PERCENTAGE = 99
     # Define the proportion of True and False elements
     MAX_ELEMENTS_PER_TYPE = (max_elements * PERCENTAGE) // 100
 
@@ -518,6 +638,10 @@ def sample_pixels_uniformly(opacities, colors, max_elements):
     else:
         merged_indices =  torch.stack([true_indices_capped, false_indices_capped], dim=1).view(-1)
 
+    new_colors = colors[merged_indices]
+    new_opacities = opacities[merged_indices]
+    """
+    merged_indices = true_indices[:max_elements]
     new_colors = colors[merged_indices]
     new_opacities = opacities[merged_indices]
 

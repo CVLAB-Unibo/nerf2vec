@@ -6,6 +6,8 @@ sanity_check/videos
 # classification/train
 classification/plots
 classification/embeddings
+classification/_archive*
+classification/last_training
 
 wandb/
 
@@ -13,8 +15,8 @@ data/data_DISCARDED
 data/data_TRAINED
 data/data_TRAINED_A1
 data/data_TRAINED_A2
+data/baseline_classifier_renderings
 
-train_*
 DO_NOT*
 
 data/*_train.json
@@ -26,4 +28,15 @@ classification/classifier*
 classification/embeddings
 classification/embeddings*
 
+saved_plots/
+plots_interp_train/
+plots_interp_validation/
+train_*.txt
+val_*.txt
+
+baseline_classifier_filtered_renderings_multi_poses/
+baseline_classifier_renderings_multi_poses/
+
+
+*.pt
 

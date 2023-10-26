@@ -7,8 +7,13 @@ import shutil
 from typing import Any, Dict
 from torch import Tensor
 import torch
+import numpy as np
+
 
 from classification import config
+from nerf.utils import Rays
+
+import torch.nn.functional as F
 
 
 def next_multiple(val, divisor):
@@ -93,6 +98,12 @@ def get_class_label(file_path):
     
     return class_label
 
+def get_class_label_from_nerf_root_path(file_path):
+    directories = os.path.normpath(file_path).split(os.sep)
+    class_label = directories[-2]
+    
+    return class_label
+
 
 def get_nerf_name_from_grid(file_path):
     grid_name = os.path.basename(file_path)
@@ -106,13 +117,102 @@ def unzip_file(file_path, extract_dir, file_name):
         with open(output_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
-def load_nerf2vec_checkpoint():
-    ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
-    ckpt_paths = [p for p in ckpts_path.glob("*.pt") if "best" not in p.name]
-    error_msg = "Expected only one ckpt apart from best, found none or too many."
-    assert len(ckpt_paths) == 1, error_msg
-    ckpt_path = ckpt_paths[0]
-    print(f'loading path: {ckpt_path}')
-    ckpt = torch.load(ckpt_path)
+
+# ################################################################################
+# CAMERA POSE MATRIX GENERATION METHODS
+# ################################################################################
+def get_translation_t(t):
+    """Get the translation matrix for movement in t."""
+    matrix = [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, t],
+        [0, 0, 0, 1],
+    ]
+
+    return torch.tensor(matrix, dtype=torch.float32)
+
+
+def get_rotation_phi(phi):
+    """Get the rotation matrix for movement in phi."""
+    matrix = [
+        [1, 0, 0, 0],
+        [0, torch.cos(phi), -torch.sin(phi), 0],
+        [0, torch.sin(phi), torch.cos(phi), 0],
+        [0, 0, 0, 1],
+    ]
+    return torch.tensor(matrix, dtype=torch.float32)
+
+
+def get_rotation_theta(theta):
+    """Get the rotation matrix for movement in theta."""
+    matrix = [
+        [torch.cos(theta), 0, -torch.sin(theta), 0],
+        [0, 1, 0, 0],
+        [torch.sin(theta), 0, torch.cos(theta), 0],
+        [0, 0, 0, 1],
+    ]
+    return torch.tensor(matrix, dtype=torch.float32)
+
+
+def pose_spherical(theta, phi, t):
+    """
+    Get the camera to world matrix for the corresponding theta, phi
+    and t.
+    """
+    c2w = get_translation_t(t)
+    c2w = get_rotation_phi(phi / 180.0 * np.pi) @ c2w
+    c2w = get_rotation_theta(theta / 180.0 * np.pi) @ c2w
+    c2w = torch.from_numpy(np.array([[-1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [
+                           0, 0, 0, 1]], dtype=np.float32)) @ c2w  
+    return c2w
+
+# ################################################################################
+# RAYS GENERATION
+# ################################################################################
+def generate_rays(device, width, height, focal, c2w, OPENGL_CAMERA=True):
+    x, y = torch.meshgrid(
+            torch.arange(width, device=device),
+            torch.arange(height, device=device),
+            indexing="xy",
+        )
+    x = x.flatten()
+    y = y.flatten()
+
+    K = torch.tensor(
+        [
+            [focal, 0, width / 2.0],
+            [0, focal, height / 2.0],
+            [0, 0, 1],
+        ],
+        dtype=torch.float32,
+        device=device,
+    )  # (3, 3)
+
+    camera_dirs = F.pad(
+        torch.stack(
+            [
+                (x - K[0, 2] + 0.5) / K[0, 0],
+                (y - K[1, 2] + 0.5)
+                / K[1, 1]
+                * (-1.0 if OPENGL_CAMERA else 1.0),
+            ],
+            dim=-1,
+        ),
+        (0, 1),
+        value=(-1.0 if OPENGL_CAMERA else 1.0),
+    )  # [num_rays, 3]
+    camera_dirs.to(device)
+
+    directions = (camera_dirs[:, None, :] * c2w[:3, :3]).sum(dim=-1)
+    origins = torch.broadcast_to(c2w[:3, -1], directions.shape)
+    viewdirs = directions / torch.linalg.norm(
+        directions, dim=-1, keepdims=True
+    )
+
+    origins = torch.reshape(origins, (height, width, 3))#.unsqueeze(0)
+    viewdirs = torch.reshape(viewdirs, (height, width, 3))#.unsqueeze(0)
     
-    return ckpt
+    rays = Rays(origins=origins, viewdirs=viewdirs)
+    
+    return rays

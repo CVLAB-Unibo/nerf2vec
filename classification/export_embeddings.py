@@ -36,7 +36,7 @@ class InrDataset(Dataset):
         data_dir = self.nerf_paths[index]
         weights_file_path = os.path.join(data_dir, self.nerf_weights_file_name)
 
-        # TODO: TEMP
+        # TODO: TEMP
         class_label = get_class_label(weights_file_path)
         class_id = config.LABELS_TO_IDS[get_class_label(weights_file_path)] if class_label != -1 else class_label
 
@@ -107,7 +107,7 @@ def export_embeddings():
     # invalid_classes = ['02992529', '03948459']
     # invalid_classes = [4, 9]
     invalid_classes = [-1]
-    
+
     folders_to_skip = {}
     
     root_folders = ['data/data_TRAINED', 'data/data_TRAINED_A1', 'data/data_TRAINED_A2']
@@ -121,9 +121,9 @@ def export_embeddings():
             folders_to_skip['./'+folder1] = True
             folders_to_skip['./'+folder2] = True
 
-    print(len(folders_to_skip))
-    
-    
+    print(f'folders_to_skip: {len(folders_to_skip)}')
+
+
 
     for loader, split in zip(loaders, splits):
         idx = 0
