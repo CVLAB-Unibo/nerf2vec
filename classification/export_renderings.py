@@ -143,47 +143,6 @@ def process_split(
         if n_generated_images % 500 == 0:
             print(f'{split} split: {n_generated_images}/{len(nerf_paths)}')
 
-"""
-def generate_rays(c2w, WIDTH, HEIGHT, K, device):
-
-    OPENGL_CAMERA = True
-
-    x, y = torch.meshgrid(
-        torch.arange(WIDTH, device=device),
-        torch.arange(HEIGHT, device=device),
-        indexing="xy",
-    )
-    x = x.flatten()
-    y = y.flatten()
-
-    camera_dirs = F.pad(
-        torch.stack(
-            [
-                (x - self.K[0, 2] + 0.5) / self.K[0, 0],
-                (y - self.K[1, 2] + 0.5)
-                / self.K[1, 1]
-                * (-1.0 if OPENGL_CAMERA else 1.0),
-            ],
-            dim=-1,
-        ),
-        (0, 1),
-        value=(-1.0 if OPENGL_CAMERA else 1.0),
-    )  # [num_rays, 3]
-
-    directions = (camera_dirs[:, None, :] * c2w[:, :3, :3]).sum(dim=-1)
-    origins = torch.broadcast_to(c2w[:, :3, -1], directions.shape)
-    viewdirs = directions / torch.linalg.norm(
-        directions, dim=-1, keepdims=True
-    )
-
-    origins = torch.reshape(origins, (HEIGHT, WIDTH, 3))
-    viewdirs = torch.reshape(viewdirs, (HEIGHT, WIDTH, 3))
-
-    rays = Rays(origins=origins, viewdirs=viewdirs)
-
-    return rays
-"""
-
 def process_split_multiple_poses(
         split,
         nerf_paths, 
@@ -202,16 +161,11 @@ def process_split_multiple_poses(
     split_path = os.path.join(rendering_path, split)
     os.makedirs(split_path, exist_ok=True)
     
-    """
-    with open('folders_to_skip2.json', 'r') as f:
+    with open(os.path.join('data', 'duplicated_NeRFs.json'), 'r') as f:
         folders_to_skip = json.load(f)
-    """
-    folders_to_skip = {}
-
+    
     n_processed_nerfs = 0
     n_skipped_folders = 0
-
-
 
     for data_dir in nerf_paths:
 
@@ -371,7 +325,8 @@ def export_baseline_renderings():
 # ################################################################################
 # TEMPORARY CODE
 # Keep consistency with the elements used for training the embeddings classifier
-# ################################################################################        
+# ################################################################################     
+"""   
 def clear_baseline_renderings():
     
     folders_to_skip_file = 'folders_to_skip.json'
@@ -427,4 +382,4 @@ def clear_baseline_renderings():
                 total += 1
     
     print(total)
-    
+"""

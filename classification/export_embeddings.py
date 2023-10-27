@@ -104,12 +104,9 @@ def export_embeddings():
     loaders = [train_loader, val_loader, test_loader]
     splits = [config.TRAIN_SPLIT, config.VAL_SPLIT, config.TEST_SPLIT]
 
-    # invalid_classes = ['02992529', '03948459']
-    # invalid_classes = [4, 9]
+    # Remove duplicated elements
     invalid_classes = [-1]
-
     folders_to_skip = {}
-    
     root_folders = ['data/data_TRAINED', 'data/data_TRAINED_A1', 'data/data_TRAINED_A2']
     for root_folder in root_folders:
         print(f'processing folder: {root_folder}')
@@ -122,7 +119,6 @@ def export_embeddings():
             folders_to_skip['./'+folder2] = True
 
     print(f'folders_to_skip: {len(folders_to_skip)}')
-
 
 
     for loader, split in zip(loaders, splits):
