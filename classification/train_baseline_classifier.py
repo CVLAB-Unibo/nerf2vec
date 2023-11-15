@@ -50,7 +50,7 @@ class BaselineDataset(Dataset):
 class BaselineClassifier:
     def __init__(self, device='cuda:0') -> None:
 
-        dset_root = Path(config.BASELINE_DIR)
+        dset_root = Path(config.RENDERINGS_MULTI_VIEW)
         train_dset = BaselineDataset(dset_root, config.TRAIN_SPLIT)
 
         train_bs = config.TRAIN_BS
@@ -191,16 +191,22 @@ class BaselineClassifier:
             # Frequency counting operation
             actual_predictions = {}
             actual_true_labels = {}
+
+            # ################################################################################
+            # VOTING APPROACH 1
+            # Compute the argmax to extract the label from each prediction.
+            # Sum all occurrences of extracted labels.
+            # Finally, compute the argmax again to compute the final label.
+            # 
+            # NOTE: this is the final chosen approach for the thesis. The results of the two 
+            # approaches is very similar, but this one is more simple and intuitive.
+            # ################################################################################
             for data_dir, pred, label in zip(data_dirs, predictions_tensor, true_labels_tensor):
                 nerf_id = f"{data_dir.split('_')[0]}_{data_dir.split('_')[1]}"
 
                 if nerf_id not in actual_predictions:
                     actual_predictions[nerf_id] = [0] * self.num_classes
-                    # actual_predictions[nerf_id] = torch.zeros(self.num_classes, device=pred.device)  # TODO: __D CHECK DIMENSION!!!!!
                     actual_true_labels[nerf_id] = label.item()
-
-                # pred_softmaxed = torch.softmax(pred, dim=0)  # TODO: __D CHECK DIMENSION!!!!!
-                # actual_predictions[nerf_id] += pred_softmaxed
 
                 curr_pred = torch.argmax(pred).item()
                 actual_predictions[nerf_id][curr_pred] += 1
@@ -208,8 +214,31 @@ class BaselineClassifier:
             # Voting operation
             for nerf_id, values in actual_predictions.items():
                 class_id = np.argmax(values)
-                # class_id = torch.argmax(values).item()
                 actual_predictions[nerf_id] = class_id
+            
+            # ################################################################################
+            
+            # ################################################################################
+            # VOTING APPROACH 2 
+            # Sum the softmax of each prediction, then compute the argmax to extract the label
+            # ################################################################################
+            """
+            for data_dir, pred, label in zip(data_dirs, predictions_tensor, true_labels_tensor):
+                nerf_id = f"{data_dir.split('_')[0]}_{data_dir.split('_')[1]}"
+
+                if nerf_id not in actual_predictions:
+                    actual_predictions[nerf_id] = torch.zeros(self.num_classes, device=pred.device)  # TODO: __D CHECK DIMENSION!!!!!
+                    actual_true_labels[nerf_id] = label.item()
+
+                pred_softmaxed = torch.softmax(pred, dim=0)  # TODO: __D CHECK DIMENSION!!!!!
+                actual_predictions[nerf_id] += pred_softmaxed
+
+            # Voting operation
+            for nerf_id, values in actual_predictions.items():
+                class_id = torch.argmax(values).item()
+                actual_predictions[nerf_id] = class_id
+            """
+            # ################################################################################
 
             # Accuracy computation
             correct_predictions = (np.array(list(actual_predictions.values())) == np.array(list(actual_true_labels.values()))).sum().item()
