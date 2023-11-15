@@ -19,8 +19,13 @@ LABELS_TO_IDS = {
     "04530566": 12   # watercraft
 }
 
-BASELINE_DIR = os.path.join('data', 'baseline_classifier_renderings_multi_poses')
+RENDERINGS_MULTI_VIEW = os.path.join('data', 'baseline_classifier_renderings_multi_poses')
+RENDERINGS_SINGLE_VIEW = os.path.join('data', 'baseline_classifier_renderings')
+
 EMBEDDINGS_DIR = os.path.join('classification', 'embeddings')
+EMBEDDINGS_BASELINE_DIR_SINGLE_VIEW = os.path.join('classification', 'embeddings_baseline_single_view')
+EMBEDDINGS_BASELINE_DIR_MULTI_VIEW = os.path.join('classification', 'embeddings_baseline_multi_view')
+
 TRAIN_SPLIT = 'train'
 VAL_SPLIT = 'val'
 TEST_SPLIT = 'test'
