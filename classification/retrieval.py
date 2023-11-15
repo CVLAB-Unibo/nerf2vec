@@ -153,8 +153,6 @@ def do_retrieval(device='cuda:0'):
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
     
-
-
     dset_root = Path(config.EMBEDDINGS_DIR)
     dset = InrEmbeddingDataset(dset_root, config.TEST_SPLIT)
 

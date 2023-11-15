@@ -181,7 +181,7 @@ def nerf2vec_baseline_comparisons(
     # ##################################################
     # BASELINE (direct interpolation of NeRF weights)
     # ##################################################
-    """
+    
     ngp_weights = [{'mlp_base.params':matrices_unflattened_A}]
     for gamma in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
         emb_interp = (1 - gamma) * matrices_unflattened_A + gamma * matrices_unflattened_B
@@ -199,7 +199,7 @@ def nerf2vec_baseline_comparisons(
             color_bkgds,
             full_path
         )
-    """
+    
 
 
 # TODO: a couple of new tasks has been added, without being very well structured in the current module.
@@ -248,7 +248,7 @@ def interpolate():
     decoder = decoder.cuda()
     decoder.eval()
 
-    split = 'validation'
+    split = 'train'
     dset_json = os.path.abspath(os.path.join('data', f'{split}.json'))  
     dset = NeRFDataset(dset_json, device='cpu')  
 
@@ -297,6 +297,10 @@ def interpolate():
         color_bkgds = test_nerf_A['color_bkgd']
         rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
         color_bkgds = color_bkgds.cuda()
+
+        # Force white color
+        # color_bkgds = torch.ones(color_bkgds.shape)
+        # color_bkgds = color_bkgds.cuda()
         
         # Interpolation
         nerf2vec_baseline_comparisons(
