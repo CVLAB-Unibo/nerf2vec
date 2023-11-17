@@ -37,6 +37,7 @@ class BaselineEmbeddingDataset(Dataset):
             
         return embedding, class_id, data_dir
 
+"""
 @torch.no_grad()
 def draw_images(data_dirs, multi_view, renderings_base_path):
 
@@ -55,6 +56,30 @@ def draw_images(data_dirs, multi_view, renderings_base_path):
         img_name = f'{img_name_prefix}_{idx}.png'
 
         imageio.imwrite(os.path.join(plots_path, img_name), image)
+"""
+
+@torch.no_grad()
+def draw_images(data_dirs, multi_view, renderings_base_path):
+
+    img_name_prefix = str(uuid.uuid4())
+    for idx, data_dir in enumerate(data_dirs):
+        # plots_path = 'retrieval_baseline_plots_single_view' if not multi_view else 'retrieval_baseline_plots_multi_view'
+        
+        # Standardize the index of the image to take
+        if multi_view:
+            split_string = data_dir.split('_')
+            split_string[-1] = '0.png'
+            data_dir = '_'.join(split_string)
+
+        
+        # image = imageio.imread(os.path.join(renderings_base_path, data_dir))
+        # img_name = data_dir.replace('.png', '')
+        img_name = f'{img_name_prefix}_{idx}.png'
+
+        with open('retrieval_baseline_multiview_log.txt', 'a') as f:
+            f.write(f'{os.path.join(renderings_base_path, data_dir)} {img_name} \n')
+
+        # imageio.imwrite(os.path.join(plots_path, img_name), image)
 
 @torch.no_grad()
 def get_recalls_multi_views(
@@ -140,6 +165,7 @@ def get_recalls_multi_views(
 
 
             # Draw the query and the first 3 neighbours
+            
             if dic_renderings[label_query] < 10:
                 indices_matched_temp = np.array(final_indices, dtype=np.int32)[:,1:3].flatten()  # Consider only 2 images per row
                 dirs_to_draw = np.insert(data_dirs[indices_matched_temp], 0, curr_data_dirs[0])  # Add the query
@@ -147,16 +173,30 @@ def get_recalls_multi_views(
                 dic_renderings[label_query] += 1
                 print(dic_renderings)
             
+            
             for k in kk:
                 # limit = k * N_VIEWS_PER_OBJECT  # TODO: CHECK THIS INDEX!
                 # indices_matched_temp = indices_matched[:limit]
+                pred = []
+                indices_for_voting = np.array(final_indices, dtype=np.int32)[:,1:k+1]
+                for col in range(indices_for_voting.shape[1]):
+                    col_indices = indices_for_voting[:,col]
+                    col_labels = targets[col_indices]
+                    unique_elements, counts = np.unique(col_labels, return_counts=True)
+                    index_of_most_common = np.argmax(counts)
+                    most_common_element = unique_elements[index_of_most_common]
+                    pred.append(most_common_element)
 
+                recalls[k] += np.count_nonzero(pred == label_query) > 0
+
+                """
                 indices_matched_temp = np.array(final_indices, dtype=np.int32)[:,1:k+1].flatten()
                 classes_matched = targets[indices_matched_temp]
                 recalls[k] += np.count_nonzero(classes_matched == label_query) > 0
+                """
 
     for key, value in recalls.items():
-        recalls[key] = value / (1.0 * len(gallery))
+        recalls[key] = value / (len(gallery) / N_VIEWS_PER_OBJECT)
 
     return recalls
 
