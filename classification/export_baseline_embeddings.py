@@ -46,6 +46,7 @@ class BaselineDataset(Dataset):
 def export_baseline_embeddings(multi_view=True):
 
     device = 'cuda:0'
+    # device = 'cpu'
 
     if multi_view:
         dset_root = Path(config.RENDERINGS_MULTI_VIEW)
@@ -73,6 +74,7 @@ def export_baseline_embeddings(multi_view=True):
 
         for batch in loader:
             images, class_ids, data_dirs = batch
+            images = images.cuda()
 
             with torch.no_grad():
                 embeddings, _ = net(images)
