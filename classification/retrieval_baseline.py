@@ -37,7 +37,7 @@ class BaselineEmbeddingDataset(Dataset):
             
         return embedding, class_id, data_dir
 
-"""
+
 @torch.no_grad()
 def draw_images(data_dirs, multi_view, renderings_base_path):
 
@@ -56,30 +56,27 @@ def draw_images(data_dirs, multi_view, renderings_base_path):
         img_name = f'{img_name_prefix}_{idx}.png'
 
         imageio.imwrite(os.path.join(plots_path, img_name), image)
-"""
 
+"""
 @torch.no_grad()
-def draw_images(data_dirs, multi_view, renderings_base_path):
+def log_results(data_dirs, multi_view, renderings_base_path):
 
     img_name_prefix = str(uuid.uuid4())
     for idx, data_dir in enumerate(data_dirs):
-        # plots_path = 'retrieval_baseline_plots_single_view' if not multi_view else 'retrieval_baseline_plots_multi_view'
-        
+
         # Standardize the index of the image to take
         if multi_view:
             split_string = data_dir.split('_')
             split_string[-1] = '0.png'
             data_dir = '_'.join(split_string)
 
-        
-        # image = imageio.imread(os.path.join(renderings_base_path, data_dir))
-        # img_name = data_dir.replace('.png', '')
         img_name = f'{img_name_prefix}_{idx}.png'
 
         with open('retrieval_baseline_multiview_log.txt', 'a') as f:
             f.write(f'{os.path.join(renderings_base_path, data_dir)} {img_name} \n')
 
         # imageio.imwrite(os.path.join(plots_path, img_name), image)
+"""
 
 @torch.no_grad()
 def get_recalls_multi_views(
@@ -94,113 +91,92 @@ def get_recalls_multi_views(
     targets = labels_gallery.cpu().numpy()
     gallery = gallery.cpu().numpy()
     tree = KDTree(gallery)
-    total = len(gallery)
 
     dic_renderings = defaultdict(int)
 
     N_VIEWS_PER_OBJECT = 9
     for i in range(0, len(gallery), N_VIEWS_PER_OBJECT):
-        print(f'processing: {i}->{i+N_VIEWS_PER_OBJECT} - TOTAL: {total}')
-        with torch.no_grad():
-            curr_queries = gallery[i:i+N_VIEWS_PER_OBJECT]
-            curr_label_queries = targets[i:i+N_VIEWS_PER_OBJECT]
-            curr_data_dirs = data_dirs[i:i+N_VIEWS_PER_OBJECT]
 
-            sanity_check_dirs = []
-            for curr_dir in curr_data_dirs:
-                query_nerf_id = f"{curr_dir.split('_')[0]}_{curr_dir.split('_')[1]}"
-                if query_nerf_id not in sanity_check_dirs:
-                    sanity_check_dirs.append(query_nerf_id)   
-            
-            # assert len(sanity_check_dirs) == 1 and len(curr_queries) == N_VIEWS_PER_OBJECT and len(np.unique(curr_label_queries)) == 1
-            assert len(sanity_check_dirs) == 1 and len(np.unique(curr_label_queries)) == 1
-            
+        curr_queries = gallery[i:i+N_VIEWS_PER_OBJECT]
+        curr_label_queries = targets[i:i+N_VIEWS_PER_OBJECT]
+        curr_data_dirs = data_dirs[i:i+N_VIEWS_PER_OBJECT]
 
-            final_indices = []
-            for input_query, label_query, data_dir in zip(curr_queries, curr_label_queries, curr_data_dirs):
-                indices_matched = []
+        sanity_check_dirs = []
+        for curr_dir in curr_data_dirs:
+            query_nerf_id = f"{curr_dir.split('_')[0]}_{curr_dir.split('_')[1]}"
+            if query_nerf_id not in sanity_check_dirs:
+                sanity_check_dirs.append(query_nerf_id)   
+        
+        assert len(sanity_check_dirs) == 1 and len(np.unique(curr_label_queries)) == 1
 
-                # nn_limit = max_nn
-                nn_limit = 25
-                max_neighbors = max_nn+1
+        final_indices = []
+        for input_query, label_query, data_dir in zip(curr_queries, curr_label_queries, curr_data_dirs):
+            indices_matched = []
 
-                while len(indices_matched) != max_neighbors:
-                    nn_limit += 1
-                    # print(f'new limit: {nn_limit}')
-                    query = np.expand_dims(input_query, 0)
-                    _, indices_matched = tree.query(query, k=nn_limit)
-                    indices_matched = indices_matched[0]
-                    
-                    indices_matched_processed = []
-                    indices_matched_processed.append(indices_matched[0])  # TODO: check equality between query and first element
+            # nn_limit = max_nn
+            nn_limit = 25
+            max_neighbors = max_nn+1
 
-                    query_nerf_id = f"{data_dir.split('_')[0]}_{data_dir.split('_')[1]}"                    
-                    object_matches = {}
-                    object_matches[query_nerf_id] = True
-                    
-                    for i in range(1, len(indices_matched)):
-                        curr_idx = indices_matched[i]
-                        curr_data_dir = data_dirs[curr_idx]
-
-                        curr_nerf_id = f"{curr_data_dir.split('_')[0]}_{curr_data_dir.split('_')[1]}"
-                        
-                        # With this condition, it is impossible that an already matched object is considered more than once.
-                        # This is something that could happen, because there are multiple images of the same object, although
-                        # they are taken from different perspectives.
-                        if curr_nerf_id not in object_matches:
-                            indices_matched_processed.append(curr_idx)
-                            object_matches[curr_nerf_id] = True
-                        
-                        if len(indices_matched_processed) == max_neighbors:
-                            break
+            while len(indices_matched) != max_neighbors:
+                nn_limit += 1
+                # print(f'new limit: {nn_limit}')
+                query = np.expand_dims(input_query, 0)
+                _, indices_matched = tree.query(query, k=nn_limit)
+                indices_matched = indices_matched[0]
                 
-                    indices_matched = indices_matched_processed
+                indices_matched_processed = []
+                indices_matched_processed.append(indices_matched[0])  # TODO: check equality between query and first element
 
-                final_indices.append(indices_matched)
+                query_nerf_id = f"{data_dir.split('_')[0]}_{data_dir.split('_')[1]}"                    
+                object_matches = {}
+                object_matches[query_nerf_id] = True
+                
+                for i in range(1, len(indices_matched)):
+                    curr_idx = indices_matched[i]
+                    curr_data_dir = data_dirs[curr_idx]
 
-            # TODO: PROCESS FINAL INDICES SO AS TO HAVE A FLATTENED VERSION OF IT????
-            # TODO: REMOVE THE FIRST ELEMENT FROM EACH LINE!?!?
-            #indices_matched = np.array(final_indices, dtype=np.int32)
-            #indices_matched = indices_matched[:, 1:].flatten()
-
-
-            # Draw the query and the first 3 neighbours
+                    curr_nerf_id = f"{curr_data_dir.split('_')[0]}_{curr_data_dir.split('_')[1]}"
+                    
+                    # With this condition, it is impossible that an already matched object is considered more than once.
+                    # This is something that could happen, because there are multiple images of the same object, although
+                    # they are taken from different perspectives.
+                    if curr_nerf_id not in object_matches:
+                        indices_matched_processed.append(curr_idx)
+                        object_matches[curr_nerf_id] = True
+                    
+                    if len(indices_matched_processed) == max_neighbors:
+                        break
             
-            if dic_renderings[label_query] < 10:
-                indices_matched_temp = np.array(final_indices, dtype=np.int32)[:,1:3].flatten()  # Consider only 2 images per row
-                dirs_to_draw = np.insert(data_dirs[indices_matched_temp], 0, curr_data_dirs[0])  # Add the query
-                draw_images(dirs_to_draw, True, renderings_base_path)
-                dic_renderings[label_query] += 1
-                print(dic_renderings)
-            
-            
-            for k in kk:
-                # limit = k * N_VIEWS_PER_OBJECT  # TODO: CHECK THIS INDEX!
-                # indices_matched_temp = indices_matched[:limit]
-                pred = []
-                indices_for_voting = np.array(final_indices, dtype=np.int32)[:,1:k+1]
-                for col in range(indices_for_voting.shape[1]):
-                    col_indices = indices_for_voting[:,col]
-                    col_labels = targets[col_indices]
-                    unique_elements, counts = np.unique(col_labels, return_counts=True)
-                    index_of_most_common = np.argmax(counts)
-                    most_common_element = unique_elements[index_of_most_common]
-                    pred.append(most_common_element)
+                indices_matched = indices_matched_processed
 
-                recalls[k] += np.count_nonzero(pred == label_query) > 0
+            final_indices.append(indices_matched)
 
-                """
-                indices_matched_temp = np.array(final_indices, dtype=np.int32)[:,1:k+1].flatten()
-                classes_matched = targets[indices_matched_temp]
-                recalls[k] += np.count_nonzero(classes_matched == label_query) > 0
-                """
+        # Draw neighbors
+        if dic_renderings[label_query] < 10:
+            indices_matched_temp = np.array(final_indices, dtype=np.int32)[:,1:3].flatten()  # Consider only 2 images per row
+            dirs_to_draw = np.insert(data_dirs[indices_matched_temp], 0, curr_data_dirs[0])  # Add the query
+            draw_images(dirs_to_draw, True, renderings_base_path)
+            dic_renderings[label_query] += 1
+            print(dic_renderings)
+        
+        
+        for k in kk:
+            pred = []
+            indices_for_voting = np.array(final_indices, dtype=np.int32)[:,1:k+1]
+            for col in range(indices_for_voting.shape[1]):
+                col_indices = indices_for_voting[:,col]
+                col_labels = targets[col_indices]
+                unique_elements, counts = np.unique(col_labels, return_counts=True)
+                index_of_most_common = np.argmax(counts)  # Voting
+                most_common_element = unique_elements[index_of_most_common]
+                pred.append(most_common_element)
+
+            recalls[k] += np.count_nonzero(pred == label_query) > 0
 
     for key, value in recalls.items():
         recalls[key] = value / (len(gallery) / N_VIEWS_PER_OBJECT)
 
     return recalls
-
-
 
 @torch.no_grad()
 def get_recalls(gallery: Tensor, 
