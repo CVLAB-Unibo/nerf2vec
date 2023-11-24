@@ -12,6 +12,7 @@ from classification.export_embeddings import export_embeddings
 from classification.export_baseline_embeddings import export_baseline_embeddings
 from classification.train_classifier import InrEmbeddingClassifier
 from evaluation.evaluation import evaluate_baseline_classification, evaluate_nerf2vec_classification
+from shape_generation.viz_nerf import create_renderings_from_GAN_embeddings
 
 def train_nerf2vec():
     nerf2vec = Nerf2vecTrainer()
@@ -71,4 +72,5 @@ if __name__ == '__main__':
     # do_retrieval()
 
     # export_baseline_embeddings(multi_view=False)
-    do_retrieval_baseline(multi_view=True)
+    # do_retrieval_baseline(multi_view=True)
+    create_renderings_from_GAN_embeddings()

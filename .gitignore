@@ -41,3 +41,6 @@ baseline_classifier_renderings_multi_poses/
 *.pt
 _archive_old_trainings/
 
+GAN_plots/
+shape_generation/experiments/
+shape_generation/latent_embeddings/
