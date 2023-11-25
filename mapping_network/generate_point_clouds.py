@@ -1,0 +1,60 @@
+import json
+from multiprocessing import Process, Queue
+import os
+from anyio import Path
+import open3d as o3d
+
+
+
+    
+def get_dataset_json(root:str, split: str):
+        json_path = os.path.join(root, f'{split}.json')
+        
+        folders = []
+        
+        with open(json_path) as file:
+            dset = json.load(file)
+        
+        for nerf_path in dset:
+            if nerf_path.endswith('_A1') or nerf_path.endswith('_A2'):
+                continue
+
+            full_path = Path(nerf_path)
+            relative_path = os.path.join(full_path.parts[-2], full_path.parts[-1])
+            folders.append(relative_path)
+        
+        return folders
+
+split_json_root_path = '/media/data7/dsirocchi/nerf2vec/data'
+out_point_clouds_path = '/media/data7/dsirocchi/nerf2vec/mapping_network/point_clouds'
+mesh_root = '/media/data7/dsirocchi/ShapeNetCore.v1'
+
+splits = ["train", "validation", "test"]
+
+for split in splits:
+     shapes = get_dataset_json(split_json_root_path, split)
+     for shape in shapes:
+        
+        mesh_class = shape.split('/')[0]
+        mesh_id = shape.split('/')[1]
+
+        mesh_path = os.path.join(mesh_root, shape, 'model.obj')
+        
+
+        mesh = o3d.io.read_triangle_mesh(mesh_path)
+
+        num_points = 10000  # Adjust the number of points as needed
+        pcd = mesh.sample_points_uniformly(number_of_points=num_points)
+        pcd_folder = os.path.join(out_point_clouds_path, mesh_class, split)
+        os.makedirs(pcd_folder, exist_ok=True)
+        
+        pcd_full_path = os.path.join(pcd_folder, f'{mesh_id}.ply')
+
+        o3d.io.write_point_cloud(pcd_full_path, pcd)
+        
+
+        
+        
+
+        
+

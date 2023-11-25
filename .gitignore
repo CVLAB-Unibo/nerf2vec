@@ -44,3 +44,6 @@ _archive_old_trainings/
 GAN_plots/
 shape_generation/experiments/
 shape_generation/latent_embeddings/
+
+mapping_network/point_clouds/
+mapping_network/inrs/

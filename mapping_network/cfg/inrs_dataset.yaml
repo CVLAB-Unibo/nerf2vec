@@ -1,0 +1,24 @@
+pcd_root: "/media/data7/dsirocchi/nerf2vec/mapping_network/point_clouds"
+split_json_root_path: "/media/data7/dsirocchi/nerf2vec/data"
+
+splits: ["train", "validation", "test"]
+num_points_pcd: 2048
+
+num_required_train_shapes: 100_000
+
+num_queries_on_surface: 100_000
+stds: [0.003, 0.01, 0.1]
+num_points_per_std: [250_000, 200_000, 25_000, 25_000]
+
+num_points_fitting: 10_000
+num_parallel_mlps: 16
+
+mlp:
+  hidden_dim: 512
+  num_hidden_layers: 4
+  init_path: "/media/data7/dsirocchi/nerf2vec/mapping_network/inits/in3_out1_h512_l4.pt"
+
+num_steps: 500
+lr: 1e-4
+
+out_root: "/media/data7/dsirocchi/nerf2vec/mapping_network/inrs"
