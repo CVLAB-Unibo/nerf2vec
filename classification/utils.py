@@ -93,8 +93,8 @@ def get_class_label(file_path):
     class_label = directories[-3]
 
     # TODO: REMOVE THIS AND BETTER COPE WITH THESE CLASSES
-    if class_label == '02992529' or class_label == '03948459':
-        return -1
+    # if class_label == '02992529' or class_label == '03948459':
+    #    return -1
     
     return class_label
 

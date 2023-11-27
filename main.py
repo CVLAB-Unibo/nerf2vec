@@ -1,5 +1,6 @@
 import os
 import sys
+from classification import export_embeddings_for_mapping
 # from classification.export_renderings import clear_baseline_renderings, export_baseline_renderings
 from classification.interp import interpolate
 from classification.retrieval import do_retrieval
@@ -73,4 +74,5 @@ if __name__ == '__main__':
 
     # export_baseline_embeddings(multi_view=False)
     # do_retrieval_baseline(multi_view=True)
-    create_renderings_from_GAN_embeddings()
+    # create_renderings_from_GAN_embeddings()
+    export_embeddings_for_mapping()
