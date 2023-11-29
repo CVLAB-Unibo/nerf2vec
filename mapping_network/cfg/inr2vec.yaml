@@ -1,4 +1,4 @@
-inrs_root: /path/to/inrs
+inrs_root: /media/data7/dsirocchi/nerf2vec/mapping_network/inrs
 
 num_queries_on_surface: 10_000
 stds: [0.003, 0.01, 0.1]

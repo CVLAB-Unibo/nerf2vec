@@ -1,6 +1,6 @@
-inrs_root: "/path/to/inrs"
-ckpt_path: "/inr2vec/ckpt/path"
-out_root: "/path/to/out/root"
+inrs_root: "/media/data7/dsirocchi/nerf2vec/mapping_network/inrs"
+ckpt_path: "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_train"
+out_root: "/media/data7/dsirocchi/nerf2vec/mapping_network/inr_embeddings"
 
 encoder:
   hidden_dims: [512, 512, 1024, 1024]
