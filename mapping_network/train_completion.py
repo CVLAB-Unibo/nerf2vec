@@ -1,4 +1,7 @@
+import math
 import sys
+
+import tqdm
 
 sys.path.append("..")
 
@@ -24,6 +27,12 @@ from torch.utils.data import DataLoader, Dataset
 from inr2vec_models.idecoder import ImplicitDecoder as INRDecoder
 from inr2vec_models.transfer import Transfer
 from models.idecoder import ImplicitDecoder as NeRFDecoder
+from nerf.utils import Rays, render_image, render_image_GT
+from classification.utils import generate_rays, pose_spherical
+
+from nerfacc import OccupancyGrid, contract_inv
+from nerf.intant_ngp import NGPradianceField
+from classification import config
 
 logging.disable(logging.INFO)
 os.environ["WANDB_SILENT"] = "true"
@@ -44,25 +53,41 @@ class InrEmbeddingDataset(Dataset):
 
     def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         with h5py.File(self.inr_item_paths[index], "r") as f:
-            pcd = torch.from_numpy(np.array(f.get("pcd")))
-            embedding_pcd = np.array(f.get("embedding"))
-            embedding_pcd = torch.from_numpy(embedding_pcd)
-            uuid_pcd = f.get("uuid").decode()
+            # TODO: RESTORE ONCE THE INR EMBEDDINGS ARE READY!
+            # pcd = torch.from_numpy(np.array(f.get("pcd")))
+            # embedding_pcd = np.array(f.get("embedding"))
+            # embedding_pcd = torch.from_numpy(embedding_pcd)
+            # uuid_pcd = f.get("uuid").decode()
+
+            pcd = torch.rand((20000, 3))
+            embedding_pcd = torch.rand(1024)
+            uuid_pcd = 'test123'
+
         
         with h5py.File(self.nerf_item_paths[index], "r") as f:
             data_dir = f.get("data_dir").decode()
-            nerf = torch.load(data_dir, map_location=torch.device(self.device))  # TODO: check this
+            nerf = torch.load(data_dir, map_location=torch.device('cpu'))  # TODO: check this
             embedding_nerf = np.array(f.get("embedding"))
             embedding_nerf = torch.from_numpy(embedding_nerf)
             uuid_nerf = f.get("uuid").decode()
-        
-        assert uuid_nerf == uuid_pcd, "UUID ERROR"
 
-        return nerf, embedding_nerf, pcd, embedding_pcd, uuid_pcd
+            grid_weights_path = os.path.join(data_dir, 'grid.pth')  
+            grid = torch.load(grid_weights_path, map_location=self.device)
+            grid['_binary'] = grid['_binary'].to_dense()#.unsqueeze(dim=0)
+            n_total_cells = 884736  # TODO: add this as config parameter (884736 if resolution == 96 else 2097152)
+            grid['occs'] = torch.empty([n_total_cells]) 
+        
+        # TODO: RESTORE ONCE THE INR EMBEDDINGS ARE READY!
+        # assert uuid_nerf == uuid_pcd, "UUID ERROR"
+
+        return nerf, embedding_nerf, grid, pcd, embedding_pcd, uuid_pcd
 
 
 class CompletionTrainer:
     def __init__(self) -> None:
+
+        torch.cuda.set_device(2)
+
         inrs_dset_root = Path(hcfg("inrs_dset_root", str))  
         nerfs_dset_root = Path(hcfg("nerfs_dset_root", str))
 
@@ -95,11 +120,13 @@ class CompletionTrainer:
             inr_decoder_cfg["num_hidden_layers_after_skip"],
             inr_decoder_cfg["out_dim"],
         )
-        inr_decoder_ckpt_path = hcfg("decoder_ckpt_path", str)  # TODO: fix this path
+        # inr_decoder_ckpt_path = hcfg("decoder_ckpt_path", str)  # TODO: fix this path
+        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/logs/inr2vec_001/ckpts/144.pt"
         inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
         inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
         self.inr_decoder = inr_decoder.cuda()
         self.inr_decoder.eval()
+
         # ####################
         # NeRF DECODER
         # ####################
@@ -123,10 +150,33 @@ class CompletionTrainer:
         )
         nerf_decoder.eval()
         self.nerf_decoder = nerf_decoder.cuda()
-        ckpt_path = os.path.join('classification','train','ckpts','499.pt')
+        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt"
         print(f'loading nerf2vec weights: {ckpt_path}')
         ckpt = torch.load(ckpt_path)
         self.nerf_decoder.load_state_dict(ckpt["decoder"])
+        
+        # ####################
+        # NerfAcc 
+        # ####################
+        self.device = nerf_decoder.device
+
+        occupancy_grid = OccupancyGrid(
+            roi_aabb=config.GRID_AABB,
+            resolution=config.GRID_RESOLUTION,
+            contraction_type=config.GRID_CONTRACTION_TYPE,
+        )
+        self.occupancy_grid = occupancy_grid.to(self.device)
+        self.occupancy_grid.eval()
+
+        self.ngp_mlp = NGPradianceField(**config.INSTANT_NGP_MLP_CONF).to(self.device)
+        self.ngp_mlp.eval()
+
+        self.scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=self.device)
+        self.render_step_size = (
+            (self.scene_aabb[3:] - self.scene_aabb[:3]).max()
+            * math.sqrt(3)
+            / config.GRID_CONFIG_N_SAMPLES
+        ).item()
 
         lr = hcfg("lr", float)
         wd = hcfg("wd", float)
@@ -159,13 +209,13 @@ class CompletionTrainer:
 
             desc = f"Epoch {epoch}/{num_epochs}"
             for batch in progress_bar(self.train_loader, desc=desc):
-                _, _, embeddings_incomplete, embeddings_complete = batch
-                embeddings_incomplete = embeddings_incomplete.cuda()
-                embeddings_complete = embeddings_complete.cuda()
+                _, embedding_nerf, _, _, embedding_pcd, _ = batch
+                embedding_nerf = embedding_nerf.cuda()
+                embedding_pcd = embedding_pcd.cuda()
 
-                embeddings_transfer = self.transfer(embeddings_incomplete)
+                embeddings_transfer = self.transfer(embedding_pcd)
 
-                loss = F.mse_loss(embeddings_transfer, embeddings_complete)
+                loss = F.mse_loss(embeddings_transfer, embedding_nerf)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -244,16 +294,17 @@ class CompletionTrainer:
         loader_iter = iter(loader)
         batch = next(loader_iter)
 
-        incompletes, completes, embeddings_incomplete, embeddings_complete = batch
+        nerfs, embedding_nerfs, grids, pcds, embedding_pcds, uuid_pcds = batch
         bs = incompletes.shape[0]
         incompletes = incompletes.cuda()
-        completes = completes.cuda()
-        embeddings_incomplete = embeddings_incomplete.cuda()
-        embeddings_complete = embeddings_complete.cuda()
+        nerfs = nerfs.cuda()
+        embedding_pcds = embedding_pcds.cuda()
+        embedding_nerfs = embedding_nerfs.cuda()
 
         with torch.no_grad():
-            embeddings_transfer = self.transfer(embeddings_incomplete)
+            embeddings_transfer = self.transfer(embedding_pcds)
 
+        """
         def udfs_func(coords: Tensor, indices: List[int]) -> Tensor:
             emb = embeddings_transfer[indices]
             pred = torch.sigmoid(self.decoder(emb, coords))
@@ -262,14 +313,68 @@ class CompletionTrainer:
             return pred
 
         pred_pcds = sample_pcds_from_udfs(udfs_func, bs, 4096, (-1, 1), 0.05, 0.02, 2048, 1)
+        """
+        pcds_2048 = random_point_sampling(pcds, 2048)
 
-        completes_2048 = random_point_sampling(completes, 2048)
+        # NeRF rendering parameters
+        width = 224
+        height = 224
+        camera_angle_x = 0.8575560450553894 # Parameter taken from traned NeRFs
+        focal_length = 0.5 * width / np.tan(0.5 * camera_angle_x)
 
-        for i in range(bs):
-            inc_wo3d = wandb.Object3D(incompletes[i].cpu().detach().numpy())
-            compl_wo3d = wandb.Object3D(completes_2048[i].cpu().detach().numpy())
-            pred_wo3d = wandb.Object3D(pred_pcds[i].cpu().detach().numpy())
-            pcd_logs = {f"{split}/pcd_{i}": [inc_wo3d, compl_wo3d, pred_wo3d]}
+        max_images = 1
+        array = np.linspace(-30.0, 30.0, max_images//2, endpoint=False)
+        array = np.append(array, np.linspace(
+            30.0, -30.0, max_images//2, endpoint=False))
+    
+    
+        theta = 90.0  # [0, 360]
+        gamma = 30  # [30.0, -30].
+        distance = 1.5
+        c2w = pose_spherical(torch.tensor(theta), torch.tensor(gamma), torch.tensor(distance))
+        c2w = c2w.cuda()
+        rays = generate_rays(embeddings_transfer.device, width, height, focal_length, c2w)
+
+        color_bkgds = torch.ones((1,3)) 
+        color_bkgds = color_bkgds.cuda()
+
+        for idx in range(len(bs)):
+            rgb_pred, _, _, _, _, _ = render_image(
+                radiance_field=self.decoder,
+                embeddings=embeddings_transfer[idx].unsqueeze(dim=0),
+                occupancy_grid=None,
+                rays=Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
+                scene_aabb=self.scene_aabb,
+                render_step_size=self.render_step_size,
+                render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
+                grid_weights=None
+            )
+            
+            curr_grid_weights = {
+                '_roi_aabb': [grids['_roi_aabb'][idx]],
+                '_binary': [grids['_binary'][idx]],
+                'resolution': [grids['resolution'][idx]],
+                'occs': [grids['occs'][idx]],
+            }
+        
+            rgb_gt, _, _ = render_image_GT(
+                radiance_field=self.ngp_mlp, 
+                occupancy_grid=self.occupancy_grid, 
+                rays=rays, 
+                scene_aabb=self.scene_aabb, 
+                render_step_size=self.render_step_size,
+                color_bkgds=color_bkgds,
+                grid_weights=curr_grid_weights,
+                ngp_mlp_weights=nerfs[idx],
+                device=self.device,
+                training=False
+            )
+
+            pcd_wo3d = wandb.Object3D(pcds_2048[idx].cpu().detach().numpy())
+            nerf_pred = wandb.Image((rgb_pred.to('cpu').detach().numpy() * 255).astype(np.uint8))
+            nerf_gt = wandb.Image((rgb_gt.to('cpu').detach().numpy() * 255).astype(np.uint8))
+
+            pcd_logs = {f"{split}/pcd_{idx}": [pcd_wo3d, nerf_gt, nerf_pred]}
             self.logfn(pcd_logs)
 
     def save_ckpt(self, best: bool = False, all: bool = False) -> None:
@@ -324,8 +429,8 @@ run_cfg_file = sys.argv[1] if len(sys.argv) == 2 else None
 )
 def main() -> None:
     wandb.init(
-        entity="entity",
-        project="inr2vec",
+        entity="dsr-lab",
+        project="mapping_network",
         name=get_run_name(),
         dir=str(get_out_dir()),
         config=get_cfg_copy(),
