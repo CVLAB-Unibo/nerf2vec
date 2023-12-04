@@ -28,12 +28,7 @@ from inr2vec_utils import get_mlps_batched_params, mlp_batched_forward
 
 class InrsDatasetCreator:
     def __init__(self) -> None:
-
-        # self.dset_name = hcfg("dset_name", str)
-        # self.pcd_root = Path(hcfg("pcd_root", str))
-        #self.splits = hcfg("splits", List[str])
-        #self.num_points_pcd = hcfg("num_points_pcd", int)
-
+        
         self.split_json_root_path = hcfg('split_json_root_path')
         self.pcd_root = Path(hcfg("pcd_root", str))
         
@@ -81,6 +76,9 @@ class InrsDatasetCreator:
         return dset
 
     def create_dataset(self) -> None:
+
+        torch.cuda.set_device(3)
+
         for split in self.splits:
             global_idx = 0
 
@@ -177,12 +175,10 @@ class InrsDatasetCreator:
                         
                         global_idx += 1
 
-
 @hmain(base_cfg_dir="cfg/bases", template_cfg_file="mapping_network/cfg/inrs_dataset.yaml", create_out_dir=False)
 def main() -> None:
     dset_creator = InrsDatasetCreator()
     dset_creator.create_dataset()
-
 
 if __name__ == "__main__":
     main()

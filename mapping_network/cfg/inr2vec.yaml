@@ -1,8 +1,8 @@
-inrs_root: /path/to/inrs
+inrs_root: /media/data7/dsirocchi/nerf2vec/mapping_network/inrs
 
-num_queries_on_surface: 10_000
+num_queries_on_surface: 3_500
 stds: [0.003, 0.01, 0.1]
-num_points_per_std: [5_000, 4_000, 500, 500]
+num_points_per_std: [3_500,2_000,500,500]
 
 encoder:
   hidden_dims: [512, 512, 1024, 1024]

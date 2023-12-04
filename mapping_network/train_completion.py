@@ -1,0 +1,444 @@
+import math
+import sys
+
+import tqdm
+
+sys.path.append("..")
+
+import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+import h5py
+import numpy as np
+import torch
+import torch.nn.functional as F
+import wandb
+from hesiod import get_cfg_copy, get_out_dir, get_run_name, hcfg, hmain
+from pycarus.geometry.pcd import random_point_sampling, sample_pcds_from_udfs
+from pycarus.metrics.chamfer_distance import chamfer_t
+from pycarus.metrics.f_score import f_score
+from pycarus.utils import progress_bar
+from torch import Tensor
+from torch.optim import AdamW
+from torch.utils.data import DataLoader, Dataset
+
+from inr2vec_models.idecoder import ImplicitDecoder as INRDecoder
+from inr2vec_models.transfer import Transfer
+from models.idecoder import ImplicitDecoder as NeRFDecoder
+from nerf.utils import Rays, render_image, render_image_GT
+from classification.utils import generate_rays, pose_spherical
+
+from nerfacc import OccupancyGrid, contract_inv
+from nerf.intant_ngp import NGPradianceField
+from classification import config
+
+logging.disable(logging.INFO)
+os.environ["WANDB_SILENT"] = "true"
+
+
+class InrEmbeddingDataset(Dataset):
+    def __init__(self, nerfs_root: Path, inrs_root: Path, split: str) -> None:
+        super().__init__()
+
+        self.nerfs_root = nerfs_root / split
+        self.inrs_root = inrs_root / split
+
+        self.nerf_item_paths = sorted(self.nerfs_root.glob("*.h5"), key=lambda x: int(x.stem))
+        self.inr_item_paths = sorted(self.inrs_root.glob("*.h5"), key=lambda x: int(x.stem))
+
+    def __len__(self) -> int:
+        return len(self.item_paths)
+
+    def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        with h5py.File(self.inr_item_paths[index], "r") as f:
+            # TODO: RESTORE ONCE THE INR EMBEDDINGS ARE READY!
+            # pcd = torch.from_numpy(np.array(f.get("pcd")))
+            # embedding_pcd = np.array(f.get("embedding"))
+            # embedding_pcd = torch.from_numpy(embedding_pcd)
+            # uuid_pcd = f.get("uuid").decode()
+
+            pcd = torch.rand((20000, 3))
+            embedding_pcd = torch.rand(1024)
+            uuid_pcd = 'test123'
+
+        
+        with h5py.File(self.nerf_item_paths[index], "r") as f:
+            data_dir = f.get("data_dir").decode()
+            nerf = torch.load(data_dir, map_location=torch.device('cpu'))  # TODO: check this
+            embedding_nerf = np.array(f.get("embedding"))
+            embedding_nerf = torch.from_numpy(embedding_nerf)
+            uuid_nerf = f.get("uuid").decode()
+
+            grid_weights_path = os.path.join(data_dir, 'grid.pth')  
+            grid = torch.load(grid_weights_path, map_location=self.device)
+            grid['_binary'] = grid['_binary'].to_dense()#.unsqueeze(dim=0)
+            n_total_cells = 884736  # TODO: add this as config parameter (884736 if resolution == 96 else 2097152)
+            grid['occs'] = torch.empty([n_total_cells]) 
+        
+        # TODO: RESTORE ONCE THE INR EMBEDDINGS ARE READY!
+        # assert uuid_nerf == uuid_pcd, "UUID ERROR"
+
+        return nerf, embedding_nerf, grid, pcd, embedding_pcd, uuid_pcd
+
+
+class CompletionTrainer:
+    def __init__(self) -> None:
+
+        torch.cuda.set_device(2)
+
+        inrs_dset_root = Path(hcfg("inrs_dset_root", str))  
+        nerfs_dset_root = Path(hcfg("nerfs_dset_root", str))
+
+        train_split = hcfg("train_split", str)
+        train_dset = InrEmbeddingDataset(nerfs_dset_root, inrs_dset_root, train_split)
+
+        train_bs = hcfg("train_bs", int)
+        self.train_loader = DataLoader(train_dset, batch_size=train_bs, num_workers=8, shuffle=True)
+
+        val_bs = hcfg("val_bs", int)
+        val_split = hcfg("val_split", str)
+        val_dset = InrEmbeddingDataset(nerfs_dset_root, inrs_dset_root, val_split)
+        self.val_loader = DataLoader(val_dset, batch_size=val_bs, num_workers=8, shuffle=True)
+        self.train_val_loader = DataLoader(train_dset, batch_size=val_bs, num_workers=8, shuffle=True)
+
+        embedding_dim = hcfg("embedding_dim", int)
+        num_layers = hcfg("num_layers_transfer", int)
+        transfer = Transfer(embedding_dim, num_layers)
+        self.transfer = transfer.cuda()
+
+        # ####################
+        # INR DECODER
+        # ####################
+        inr_decoder_cfg = hcfg("inr_decoder", Dict[str, Any])
+        inr_decoder = INRDecoder(
+            embedding_dim,
+            inr_decoder_cfg["input_dim"],
+            inr_decoder_cfg["hidden_dim"],
+            inr_decoder_cfg["num_hidden_layers_before_skip"],
+            inr_decoder_cfg["num_hidden_layers_after_skip"],
+            inr_decoder_cfg["out_dim"],
+        )
+        # inr_decoder_ckpt_path = hcfg("decoder_ckpt_path", str)  # TODO: fix this path
+        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/logs/inr2vec_001/ckpts/144.pt"
+        inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
+        inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
+        self.inr_decoder = inr_decoder.cuda()
+        self.inr_decoder.eval()
+
+        # ####################
+        # NeRF DECODER
+        # ####################
+        nerf_decoder_cfg = hcfg("nerf_decoder", Dict[str, Any])
+
+        INSTANT_NGP_ENCODING_CONF = {
+            "otype": "Frequency",
+            "n_frequencies": 24
+        }
+        GRID_AABB = [-0.7, -0.7, -0.7, 0.7, 0.7, 0.7]
+
+        nerf_decoder = NeRFDecoder(
+            embed_dim=embedding_dim,
+            in_dim=nerf_decoder_cfg["input_dim"],
+            hidden_dim=nerf_decoder_cfg["hidden_dim"],
+            num_hidden_layers_before_skip=nerf_decoder_cfg["num_hidden_layers_before_skip"],
+            num_hidden_layers_after_skip=nerf_decoder_cfg["num_hidden_layers_after_skip"],
+            out_dim=nerf_decoder_cfg["out_dim"],
+            encoding_conf=INSTANT_NGP_ENCODING_CONF,
+            aabb=torch.tensor(GRID_AABB, dtype=torch.float32).cuda()
+        )
+        nerf_decoder.eval()
+        self.nerf_decoder = nerf_decoder.cuda()
+        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt"
+        print(f'loading nerf2vec weights: {ckpt_path}')
+        ckpt = torch.load(ckpt_path)
+        self.nerf_decoder.load_state_dict(ckpt["decoder"])
+        
+        # ####################
+        # NerfAcc 
+        # ####################
+        self.device = nerf_decoder.device
+
+        occupancy_grid = OccupancyGrid(
+            roi_aabb=config.GRID_AABB,
+            resolution=config.GRID_RESOLUTION,
+            contraction_type=config.GRID_CONTRACTION_TYPE,
+        )
+        self.occupancy_grid = occupancy_grid.to(self.device)
+        self.occupancy_grid.eval()
+
+        self.ngp_mlp = NGPradianceField(**config.INSTANT_NGP_MLP_CONF).to(self.device)
+        self.ngp_mlp.eval()
+
+        self.scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=self.device)
+        self.render_step_size = (
+            (self.scene_aabb[3:] - self.scene_aabb[:3]).max()
+            * math.sqrt(3)
+            / config.GRID_CONFIG_N_SAMPLES
+        ).item()
+
+        lr = hcfg("lr", float)
+        wd = hcfg("wd", float)
+        self.optimizer = AdamW(self.transfer.parameters(), lr, weight_decay=wd)
+
+        self.epoch = 0
+        self.global_step = 0
+        self.best_chamfer = 1000.0
+
+        self.ckpts_path = get_out_dir() / "ckpts"
+        self.all_ckpts_path = get_out_dir() / "all_ckpts"
+
+        if self.ckpts_path.exists():
+            self.restore_from_last_ckpt()
+
+        self.ckpts_path.mkdir(exist_ok=True)
+        self.all_ckpts_path.mkdir(exist_ok=True)
+
+    def logfn(self, values: Dict[str, Any]) -> None:
+        wandb.log(values, step=self.global_step, commit=False)
+
+    def train(self) -> None:
+        num_epochs = hcfg("num_epochs", int)
+        start_epoch = self.epoch
+
+        for epoch in range(start_epoch, num_epochs):
+            self.epoch = epoch
+
+            self.transfer.train()
+
+            desc = f"Epoch {epoch}/{num_epochs}"
+            for batch in progress_bar(self.train_loader, desc=desc):
+                _, embedding_nerf, _, _, embedding_pcd, _ = batch
+                embedding_nerf = embedding_nerf.cuda()
+                embedding_pcd = embedding_pcd.cuda()
+
+                embeddings_transfer = self.transfer(embedding_pcd)
+
+                loss = F.mse_loss(embeddings_transfer, embedding_nerf)
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                if self.global_step % 10 == 0:
+                    self.logfn({"train/loss": loss.item()})
+
+                self.global_step += 1
+
+            if epoch % 10 == 9 or epoch == num_epochs - 1:
+                # self.val("train")
+                # self.val("val")
+                self.plot("train")
+                self.plot("val")
+                self.save_ckpt()
+
+            if epoch % 50 == 0:
+                self.save_ckpt(all=True)
+    """
+    def val(self, split: str) -> None:
+        loader = self.train_val_loader if split == "train" else self.val_loader
+        self.transfer.eval()
+
+        cdts = []
+        fscores = []
+        idx = 0
+
+        for batch in progress_bar(loader, desc=f"Validating on {split} set"):
+            incompletes, completes, embeddings_incomplete, embeddings_complete = batch
+            bs = incompletes.shape[0]
+            incompletes = incompletes.cuda()
+            completes = completes.cuda()
+            embeddings_incomplete = embeddings_incomplete.cuda()
+            embeddings_complete = embeddings_complete.cuda()
+
+            with torch.no_grad():
+                embeddings_transfer = self.transfer(embeddings_incomplete)
+
+            def udfs_func(coords: Tensor, indices: List[int]) -> Tensor:
+                emb = embeddings_transfer[indices]
+                pred = torch.sigmoid(self.decoder(emb, coords))
+                pred = 1 - pred
+                pred *= 0.1
+                return pred
+
+            pred_pcds = sample_pcds_from_udfs(udfs_func, bs, 4096, (-1, 1), 0.05, 0.02, 2048, 1)
+
+            completes_2048 = random_point_sampling(completes, 2048)
+
+            cd = chamfer_t(pred_pcds, completes_2048)
+            cdts.extend([float(cd[i]) for i in range(bs)])
+
+            f = f_score(pred_pcds, completes_2048, threshold=0.01)[0]
+            fscores.extend([float(f[i]) for i in range(bs)])
+
+            if idx > 9:
+                break
+            idx += 1
+
+        mean_cdt = sum(cdts) / len(cdts)
+        mean_fscore = sum(fscores) / len(fscores)
+
+        self.logfn({f"{split}/cdt": mean_cdt})
+        self.logfn({f"{split}/fscore": mean_fscore})
+
+        if split == "val" and mean_cdt < self.best_chamfer:
+            self.best_chamfer = mean_cdt
+            self.save_ckpt(best=True)
+    """
+
+    def plot(self, split: str) -> None:
+        loader = self.train_val_loader if split == "train" else self.val_loader
+        self.transfer.eval()
+
+        loader_iter = iter(loader)
+        batch = next(loader_iter)
+
+        nerfs, embedding_nerfs, grids, pcds, embedding_pcds, uuid_pcds = batch
+        bs = incompletes.shape[0]
+        incompletes = incompletes.cuda()
+        nerfs = nerfs.cuda()
+        embedding_pcds = embedding_pcds.cuda()
+        embedding_nerfs = embedding_nerfs.cuda()
+
+        with torch.no_grad():
+            embeddings_transfer = self.transfer(embedding_pcds)
+
+        """
+        def udfs_func(coords: Tensor, indices: List[int]) -> Tensor:
+            emb = embeddings_transfer[indices]
+            pred = torch.sigmoid(self.decoder(emb, coords))
+            pred = 1 - pred
+            pred *= 0.1
+            return pred
+
+        pred_pcds = sample_pcds_from_udfs(udfs_func, bs, 4096, (-1, 1), 0.05, 0.02, 2048, 1)
+        """
+        pcds_2048 = random_point_sampling(pcds, 2048)
+
+        # NeRF rendering parameters
+        width = 224
+        height = 224
+        camera_angle_x = 0.8575560450553894 # Parameter taken from traned NeRFs
+        focal_length = 0.5 * width / np.tan(0.5 * camera_angle_x)
+
+        max_images = 1
+        array = np.linspace(-30.0, 30.0, max_images//2, endpoint=False)
+        array = np.append(array, np.linspace(
+            30.0, -30.0, max_images//2, endpoint=False))
+    
+    
+        theta = 90.0  # [0, 360]
+        gamma = 30  # [30.0, -30].
+        distance = 1.5
+        c2w = pose_spherical(torch.tensor(theta), torch.tensor(gamma), torch.tensor(distance))
+        c2w = c2w.cuda()
+        rays = generate_rays(embeddings_transfer.device, width, height, focal_length, c2w)
+
+        color_bkgds = torch.ones((1,3)) 
+        color_bkgds = color_bkgds.cuda()
+
+        for idx in range(len(bs)):
+            rgb_pred, _, _, _, _, _ = render_image(
+                radiance_field=self.decoder,
+                embeddings=embeddings_transfer[idx].unsqueeze(dim=0),
+                occupancy_grid=None,
+                rays=Rays(origins=rays.origins[idx].unsqueeze(dim=0), viewdirs=rays.viewdirs[idx].unsqueeze(dim=0)),
+                scene_aabb=self.scene_aabb,
+                render_step_size=self.render_step_size,
+                render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
+                grid_weights=None
+            )
+            
+            curr_grid_weights = {
+                '_roi_aabb': [grids['_roi_aabb'][idx]],
+                '_binary': [grids['_binary'][idx]],
+                'resolution': [grids['resolution'][idx]],
+                'occs': [grids['occs'][idx]],
+            }
+        
+            rgb_gt, _, _ = render_image_GT(
+                radiance_field=self.ngp_mlp, 
+                occupancy_grid=self.occupancy_grid, 
+                rays=rays, 
+                scene_aabb=self.scene_aabb, 
+                render_step_size=self.render_step_size,
+                color_bkgds=color_bkgds,
+                grid_weights=curr_grid_weights,
+                ngp_mlp_weights=nerfs[idx],
+                device=self.device,
+                training=False
+            )
+
+            pcd_wo3d = wandb.Object3D(pcds_2048[idx].cpu().detach().numpy())
+            nerf_pred = wandb.Image((rgb_pred.to('cpu').detach().numpy() * 255).astype(np.uint8))
+            nerf_gt = wandb.Image((rgb_gt.to('cpu').detach().numpy() * 255).astype(np.uint8))
+
+            pcd_logs = {f"{split}/pcd_{idx}": [pcd_wo3d, nerf_gt, nerf_pred]}
+            self.logfn(pcd_logs)
+
+    def save_ckpt(self, best: bool = False, all: bool = False) -> None:
+        ckpt = {
+            "epoch": self.epoch,
+            "best_chamfer": self.best_chamfer,
+            "net": self.transfer.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+        }
+
+        if all:
+            ckpt_path = self.all_ckpts_path / f"{self.epoch}.pt"
+            torch.save(ckpt, ckpt_path)
+
+        else:
+            for previous_ckpt_path in self.ckpts_path.glob("*.pt"):
+                if "best" not in previous_ckpt_path.name:
+                    previous_ckpt_path.unlink()
+
+            ckpt_path = self.ckpts_path / f"{self.epoch}.pt"
+            torch.save(ckpt, ckpt_path)
+
+        if best:
+            ckpt_path = self.ckpts_path / "best.pt"
+            torch.save(ckpt, ckpt_path)
+
+    def restore_from_last_ckpt(self) -> None:
+        if self.ckpts_path.exists():
+            ckpt_paths = [p for p in self.ckpts_path.glob("*.pt") if "best" not in p.name]
+            error_msg = "Expected only one ckpt apart from best, found none or too many."
+            assert len(ckpt_paths) == 1, error_msg
+
+            ckpt_path = ckpt_paths[0]
+            ckpt = torch.load(ckpt_path)
+
+            self.epoch = ckpt["epoch"] + 1
+            self.global_step = self.epoch * len(self.train_loader)
+            self.best_chamfer = ckpt["best_chamfer"]
+
+            self.transfer.load_state_dict(ckpt["net"])
+            self.optimizer.load_state_dict(ckpt["optimizer"])
+
+
+run_cfg_file = sys.argv[1] if len(sys.argv) == 2 else None
+
+
+@hmain(
+    base_cfg_dir="cfg/bases",
+    template_cfg_file="cfg/completion.yaml",
+    run_cfg_file=run_cfg_file,
+    parse_cmd_line=False,
+)
+def main() -> None:
+    wandb.init(
+        entity="dsr-lab",
+        project="mapping_network",
+        name=get_run_name(),
+        dir=str(get_out_dir()),
+        config=get_cfg_copy(),
+    )
+
+    trainer = CompletionTrainer()
+    trainer.train()
+
+
+if __name__ == "__main__":
+    main()
