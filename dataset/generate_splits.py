@@ -42,7 +42,6 @@ def create():
         '/media/data4TB/sirocchi/nerf2vec/data/data_TRAINED_A1', 
         '/media/data4TB/sirocchi/nerf2vec/data/data_TRAINED_A2'
     ]
-    # root_paths = ['C:\\Users\\dsiro\\Documents\\Projects\\nerf2vec\\data\\data_TRAINED']
 
     train = []
     validation = []
@@ -90,8 +89,9 @@ def create():
             assert not no_common_elements == n_elements, 'Some elements are shared between splits'
 
             train = train + train_elements
-            validation = validation + validation_elements
-            test = test + test_elements
+            if '_A1' not in curr_path and '_A2' not in curr_path:
+                validation = validation + validation_elements
+                test = test + test_elements
 
     
     base_path = 'dataset'
