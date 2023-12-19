@@ -25,7 +25,6 @@ from torch.utils.data import DataLoader, Dataset
 
 from classification import config_classifier as config
 from models.fc_classifier import FcClassifier
-from torchmetrics.classification.accuracy import Accuracy
 
 from sklearn.neighbors import KDTree
 

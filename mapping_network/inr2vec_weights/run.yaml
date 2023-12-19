@@ -1,0 +1,19 @@
+'***hesiod_out_dir***': /media/data7/dsirocchi/nerf2vec/logs/inr2vec_001
+decoder: {hidden_dim: 512, input_dim: 3, num_hidden_layers_after_skip: 2, num_hidden_layers_before_skip: 2,
+  out_dim: 1}
+encoder:
+  embedding_dim: 1024
+  hidden_dims: [512, 512, 1024, 1024]
+inrs_root: /media/data7/dsirocchi/nerf2vec/mapping_network/inrs
+lr: 0.0001
+mlp: {hidden_dim: 512, num_hidden_layers: 4}
+num_epochs: 300
+num_points_per_std: [3500, 2000, 500, 500]
+num_queries_on_surface: 3500
+run_name: inr2vec_001
+stds: [0.003, 0.01, 0.1]
+train_bs: 16
+train_split: train
+val_bs: 16
+val_split: val
+wd: 0.01

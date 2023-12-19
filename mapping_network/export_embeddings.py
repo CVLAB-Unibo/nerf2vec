@@ -10,7 +10,7 @@ from pycarus.utils import progress_bar
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from models.encoder import Encoder
+from inr2vec_models.encoder import Encoder
 from inr2vec_utils import get_mlp_params_as_matrix
 
 
@@ -32,7 +32,7 @@ class InrDataset(Dataset):
             params = torch.from_numpy(params).float()
             matrix = get_mlp_params_as_matrix(params, self.sample_sd)
             class_id = torch.from_numpy(np.array(f.get("class_id"))).long()
-            uuid = f.get("uuid").decode() # TODO: check this
+            uuid = f.get("uuid")[()].decode() 
 
         return pcd, matrix, class_id, uuid
 
@@ -43,6 +43,9 @@ class InrDataset(Dataset):
     create_out_dir=False,
 )
 def main() -> None:
+
+    torch.cuda.set_device(3)
+
     inrs_root = Path(hcfg("inrs_root", str))
 
     mlp_hdim = hcfg("mlp.hidden_dim", int)
@@ -54,7 +57,7 @@ def main() -> None:
     train_dset = InrDataset(inrs_root, train_split, sample_sd)
     train_loader = DataLoader(train_dset, batch_size=1, num_workers=0, shuffle=False)
 
-    """
+    
     val_split = hcfg("val_split", str)
     val_dset = InrDataset(inrs_root, val_split, sample_sd)
     val_loader = DataLoader(val_dset, batch_size=1, num_workers=0, shuffle=False)
@@ -62,7 +65,7 @@ def main() -> None:
     test_split = hcfg("test_split", str)
     test_dset = InrDataset(inrs_root, test_split, sample_sd)
     test_loader = DataLoader(test_dset, batch_size=1, num_workers=0, shuffle=False)
-    """
+    
 
     encoder_cfg = hcfg("encoder", Dict[str, Any])
     encoder = Encoder(
@@ -75,13 +78,17 @@ def main() -> None:
     encoder = encoder.cuda()
     encoder.eval()
 
-    loaders = [train_loader]#, val_loader, test_loader]
-    splits = [train_split]#, val_split, test_split]
+    loaders = [train_loader, val_loader, test_loader]
+    splits = [train_split, val_split, test_split]
 
     for loader, split in zip(loaders, splits):
         idx = 0
 
         for batch in progress_bar(loader, f"{split}"):
+            
+            if split == 'train' and idx == 32414:
+                break
+            
             pcds, matrices, class_ids, uuids = batch
             matrices = matrices.cuda()
 

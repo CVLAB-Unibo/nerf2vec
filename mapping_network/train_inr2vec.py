@@ -51,6 +51,9 @@ class InrDataset(Dataset):
 
 class Inr2vecTrainer:
     def __init__(self) -> None:
+
+        torch.cuda.set_device(3)
+
         inrs_root = Path(hcfg("inrs_root", str))
 
         self.num_queries_on_surface = hcfg("num_queries_on_surface", int)
@@ -322,14 +325,14 @@ run_cfg_file = sys.argv[1] if len(sys.argv) == 2 else None
 
 
 @hmain(
-    base_cfg_dir="cfg/bases",
-    template_cfg_file="cfg/inr2vec.yaml",
+    base_cfg_dir="mapping_network/cfg/bases",
+    template_cfg_file="mapping_network/cfg/inr2vec.yaml",
     run_cfg_file=run_cfg_file,
     parse_cmd_line=False,
 )
 def main() -> None:
     wandb.init(
-        entity="entity",
+        entity='dsr-lab',
         project="inr2vec",
         name=get_run_name(),
         dir=str(get_out_dir()),

@@ -49,3 +49,6 @@ mapping_network/point_clouds/
 mapping_network/inrs*
 
 mapping_network/nerf_embeddings
+mapping_network/inr_embeddings
+
+logs/

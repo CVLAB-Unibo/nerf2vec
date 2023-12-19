@@ -54,17 +54,12 @@ class InrEmbeddingDataset(Dataset):
 
     def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         with h5py.File(self.inr_item_paths[index], "r") as f:
-            # TODO: RESTORE ONCE THE INR EMBEDDINGS ARE READY!
-            # pcd = torch.from_numpy(np.array(f.get("pcd")))
-            # embedding_pcd = np.array(f.get("embedding"))
-            # embedding_pcd = torch.from_numpy(embedding_pcd)
-            # uuid_pcd = f.get("uuid")[()].decode()
+            pcd = torch.from_numpy(np.array(f.get("pcd")))
+            embedding_pcd = np.array(f.get("embedding"))
+            embedding_pcd = torch.from_numpy(embedding_pcd)
+            uuid_pcd = f.get("uuid")[()].decode()
 
-            pcd = torch.rand((20000, 3))
-            embedding_pcd = torch.rand(1024)
-            uuid_pcd = 'test123'
 
-        
         with h5py.File(self.nerf_item_paths[index], "r") as f:
             nerf_data_dir = f.get("data_dir")[()].decode()
             
@@ -72,17 +67,16 @@ class InrEmbeddingDataset(Dataset):
             embedding_nerf = torch.from_numpy(embedding_nerf)
             uuid_nerf = f.get("uuid")[()].decode()
         
-        # TODO: RESTORE ONCE THE INR EMBEDDINGS ARE READY!
-        # assert uuid_nerf == uuid_pcd, "UUID ERROR"
+        assert uuid_nerf == uuid_pcd, "UUID ERROR"
 
         return embedding_nerf, nerf_data_dir, pcd, embedding_pcd, uuid_pcd
 
 
 class CompletionTrainer:
     def __init__(self) -> None:
-
-        cuda_idx = 0
-        # torch.cuda.set_device(cuda_idx)
+        
+        cuda_idx = 3
+        torch.cuda.set_device(cuda_idx)
 
         inrs_dset_root = Path(hcfg("inrs_dset_root", str))  
         nerfs_dset_root = Path(hcfg("nerfs_dset_root", str))
@@ -116,10 +110,9 @@ class CompletionTrainer:
             inr_decoder_cfg["num_hidden_layers_after_skip"],
             inr_decoder_cfg["out_dim"],
         )
-        # TODO: RESTORE THESE LINES
-        # inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/logs/inr2vec_001/ckpts/144.pt"
-        # inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
-        # inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
+        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"
+        inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
+        inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
         self.inr_decoder = inr_decoder.cuda()
         self.inr_decoder.eval()
 
@@ -146,11 +139,10 @@ class CompletionTrainer:
         )
         nerf_decoder.eval()
         self.nerf_decoder = nerf_decoder.cuda()
-        # TODO: RESTORE THESE LINES
-        # ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt"
-        # print(f'loading nerf2vec weights: {ckpt_path}')
-        # ckpt = torch.load(ckpt_path)
-        # self.nerf_decoder.load_state_dict(ckpt["decoder"])
+        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt"
+        print(f'loading nerf2vec weights: {ckpt_path}')
+        ckpt = torch.load(ckpt_path)
+        self.nerf_decoder.load_state_dict(ckpt["decoder"])
         
         # ####################
         # NerfAcc 
@@ -223,12 +215,18 @@ class CompletionTrainer:
 
                 self.global_step += 1
 
-            if epoch % 10 == 9 or epoch == num_epochs - 1:
+            if epoch % 10 == 0 or epoch == num_epochs - 1:
                 # self.val("train")
                 # self.val("val")
+                # self.plot("train")
+                # self.plot("val")
+                self.save_ckpt()
+            
+            """
+            if epoch % 50 == 0 or epoch == num_epochs - 1:
                 self.plot("train")
                 self.plot("val")
-                self.save_ckpt()
+            """
 
             if epoch % 50 == 0:
                 self.save_ckpt(all=True)
@@ -307,10 +305,8 @@ class CompletionTrainer:
             n_total_cells = 884736  # TODO: add this as config parameter (884736 if resolution == 96 else 2097152)
             grid['occs'] = torch.empty([n_total_cells]) 
             grids.append(grid)
-        # nerfs = torch.tensor(nerfs).cuda()
-        # grids = torch.tensor(grids).cuda()
 
-        bs = pcds.shape[0] // 8  # TODO: REMOVE THE DIVISION
+        bs = pcds.shape[0]
         pcds = pcds.cuda()
         # nerfs = nerfs.cuda()
         embedding_pcds = embedding_pcds.cuda()
@@ -453,7 +449,7 @@ run_cfg_file = sys.argv[1] if len(sys.argv) == 2 else None
     run_cfg_file=run_cfg_file,
     parse_cmd_line=False,
 )
-def main() -> None:
+def train_completion() -> None:
     wandb.init(
         entity="dsr-lab",
         project="mapping_network",

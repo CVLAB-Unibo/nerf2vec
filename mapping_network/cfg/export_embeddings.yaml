@@ -1,5 +1,5 @@
 inrs_root: "/media/data7/dsirocchi/nerf2vec/mapping_network/inrs"
-ckpt_path: "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_train"
+ckpt_path: "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"
 out_root: "/media/data7/dsirocchi/nerf2vec/mapping_network/inr_embeddings"
 
 encoder:
