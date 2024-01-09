@@ -205,9 +205,7 @@ def nerf2vec_baseline_comparisons(
 # TODO: a couple of new tasks has been added, without being very well structured in the current module.
 #       Therefore, it is necessary to do some refactoring.
 @torch.no_grad()
-def interpolate():
-
-    device = 'cuda'
+def do_interpolation(device = 'cuda'):
     scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
         (scene_aabb[3:] - scene_aabb[:3]).max()

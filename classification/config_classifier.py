@@ -1,5 +1,5 @@
 import os
-from classification import config as base_config
+from nerf2vec import config as base_config
 
 LABELS_TO_IDS = {
     "02691156": 0,   # airplane

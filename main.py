@@ -1,30 +1,28 @@
 import os
-import sys
-from classification import export_embeddings_for_mapping
-# from classification.export_renderings import clear_baseline_renderings, export_baseline_renderings
-from classification.interp import interpolate
-from classification.retrieval import do_retrieval
-from classification.retrieval_baseline import do_retrieval_baseline
-from classification.train_baseline_classifier import BaselineClassifier
-
-from classification.train_nerf2vec import Nerf2vecTrainer
-from dataset.generate_grids import start_grids_generation
-from classification.export_embeddings import export_embeddings
-from classification.export_baseline_embeddings import export_baseline_embeddings
 from classification.train_classifier import InrEmbeddingClassifier
-from evaluation.evaluation import evaluate_baseline_classification, evaluate_nerf2vec_classification
-from shape_generation.viz_nerf import create_renderings_from_GAN_embeddings
+from nerf2vec.interp import do_interpolation
+from nerf2vec.retrieval import do_retrieval
+
+from nerf2vec.train_nerf2vec import Nerf2vecTrainer
+import torch
+
+cuda_idx = 2
+device_name = f'cuda:{cuda_idx}'
+torch.cuda.set_device(cuda_idx)
 
 def train_nerf2vec():
-    nerf2vec = Nerf2vecTrainer()
+    nerf2vec = Nerf2vecTrainer(device=device_name)
     nerf2vec.train()
 
 def train_classifier():
     classifier = InrEmbeddingClassifier()
     classifier.train()
 
-def interpolate_embeddings():
-    interpolate()
+def execute_interpolation_task():
+    do_interpolation(device=device_name)
+
+def execute_retrieval_task():
+    do_retrieval(device=device_name)
 
 def generate_grids():
 
@@ -37,21 +35,47 @@ def generate_grids():
     for nerf_root in nerf_roots:
         start_grids_generation(nerf_root)
 
-        
-if __name__ == '__main__':
+
+
+def main():
+    method_to_call = None
     
-    # TODO: uncomment this as soon as the training is complete (must be tested)
-    """
-    if len(sys.argv) < 2:
-        print("Please provide a method name as an argument.")
-    else:
-        method_name = sys.argv[1]
-        if hasattr(sys.modules[__name__], method_name):
-            method = getattr(sys.modules[__name__], method_name)
-            method()
-        else:
-            print(f"Method '{method_name}' does not exist.")
-    """
+    choices = {
+        0: ['Train nerf2vec', train_nerf2vec],
+        1: ['Interpolate', execute_interpolation_task],
+        2: ['Retrieval', execute_retrieval_task],
+        3: ['Train classifier', train_classifier]
+    }
+
+    while True:
+        # Display the menu options
+        print(f'Select an option (0-{len(choices)-1}):')
+
+        for i in choices:
+            description = choices[i][0]
+            print(f'{i}. {description}')
+
+        # Get user input
+        try:
+            choice = int(input("Enter your choice: "))
+            
+            # Check if the choice is valid
+            if 0 <= choice <= 10:
+                print(f"You selected option {choice}.")
+                method_to_call = choices[choice][1]
+                # Here, you can add code to handle each choice
+                # For example, call different functions based on the choice
+                break  # Exit the loop if the choice is valid
+            else:
+                print("Invalid choice. Please enter a number between 1 and 10.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+    
+    method_to_call()
+    print()
+
+if __name__ == '__main__':
+    main()
 
     # train_nerf2vec()
     # generate_grids()
@@ -75,4 +99,8 @@ if __name__ == '__main__':
     # export_baseline_embeddings(multi_view=False)
     # do_retrieval_baseline(multi_view=True)
     # create_renderings_from_GAN_embeddings()
-    export_embeddings_for_mapping()
+    # export_embeddings_for_mapping()
+    # train_completion()
+
+    # train_nerf2vec()
+

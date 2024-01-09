@@ -1,30 +1,20 @@
 from collections import defaultdict
-import copy
-import logging
 import math
 import os
-import sys
-import time
 import uuid
 from classification.export_renderings import get_rays
-from classification.utils import get_mlp_params_as_matrix
 import h5py
-import datetime
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import OneCycleLR
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 from classification import config_classifier as config
-from models.fc_classifier import FcClassifier
 
 from sklearn.neighbors import KDTree
 
@@ -33,8 +23,6 @@ from nerf.utils import Rays, render_image
 
 import imageio.v2 as imageio
 from torch.cuda.amp import autocast
-
-
 
 
 class InrEmbeddingDataset(Dataset):
@@ -55,6 +43,7 @@ class InrEmbeddingDataset(Dataset):
             class_id = torch.from_numpy(class_id).long()
             
         return embedding, class_id
+
 
 @torch.no_grad()
 def draw_images(decoder, embeddings, device='cuda:0'):

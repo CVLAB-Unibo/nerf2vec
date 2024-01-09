@@ -9,12 +9,10 @@ from torch import Tensor
 import torch
 import numpy as np
 
-
-from classification import config
+from nerf2vec import config
 from nerf.utils import Rays
 
 import torch.nn.functional as F
-
 
 def next_multiple(val, divisor):
     """
@@ -62,9 +60,8 @@ def get_mlp_params_as_matrix(flattened_params: Tensor, sd: Dict[str, Any] = None
     padding_size = (feat_dim-params_shapes[-1][0]) * params_shapes[-1][1]
     padding_tensor = torch.zeros(padding_size)
     params = torch.cat((flattened_params, padding_tensor), dim=0)
-
-    # TODO: for the future, it could be possible to try to transpose the returned matrix.
-    # this would be more compliant to inr2vec
+    # TODO: __D comment this part
+    
     return params.reshape((-1, feat_dim))
 
 

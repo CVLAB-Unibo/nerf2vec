@@ -56,27 +56,7 @@ def draw_images(data_dirs, multi_view, renderings_base_path):
         img_name = f'{img_name_prefix}_{idx}.png'
 
         imageio.imwrite(os.path.join(plots_path, img_name), image)
-
-"""
-@torch.no_grad()
-def log_results(data_dirs, multi_view, renderings_base_path):
-
-    img_name_prefix = str(uuid.uuid4())
-    for idx, data_dir in enumerate(data_dirs):
-
-        # Standardize the index of the image to take
-        if multi_view:
-            split_string = data_dir.split('_')
-            split_string[-1] = '0.png'
-            data_dir = '_'.join(split_string)
-
-        img_name = f'{img_name_prefix}_{idx}.png'
-
-        with open('retrieval_baseline_multiview_log.txt', 'a') as f:
-            f.write(f'{os.path.join(renderings_base_path, data_dir)} {img_name} \n')
-
-        # imageio.imwrite(os.path.join(plots_path, img_name), image)
-"""
+        
 
 @torch.no_grad()
 def get_recalls_multi_views(

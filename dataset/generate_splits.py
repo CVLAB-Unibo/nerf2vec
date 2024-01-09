@@ -11,7 +11,6 @@ import random
 
 def cycle_path(nerfs_root):
     
-
     dict_result = {}
 
     last_two_parts = os.path.join(*os.path.splitdrive(nerfs_root)[1].split(os.sep)[-2:])

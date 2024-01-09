@@ -1,4 +1,17 @@
-# TODO: rename this module in config_nerf2vec.py, and update all the references to it.
+import os
+
+"""
+# ####################
+# PATHS AND REFERENCES
+# ####################
+"""
+TRAIN_DSET_JSON = os.path.abspath(os.path.join('data', 'train.json'))
+VAL_DSET_JSON = os.path.abspath(os.path.join('data', 'validation.json'))  
+TEST_DSET_JSON = os.path.abspath(os.path.join('data', 'test.json'))  
+
+CKPTS_PATH = os.path.join('nerf2vec', 'train', 'ckpts')
+ALL_CKPTS_PATH = os.path.join('nerf2vec', 'train', 'all_ckpts')
+
 """
 # ####################
 # NERF2VEC
@@ -20,7 +33,7 @@ DECODER_OUT_DIM = 4
 # 
 # TRAIN 
 #
-NUM_EPOCHS = 500
+NUM_EPOCHS = 501
 BATCH_SIZE = 16
 LR = 1e-4
 WD = 1e-2
