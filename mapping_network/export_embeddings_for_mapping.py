@@ -10,7 +10,7 @@ from torch import Tensor
 from classification.utils import get_class_label, get_mlp_params_as_matrix
 from models.encoder import Encoder
 
-from classification import config_classifier as config
+from classification import config as config
 
 import h5py
 

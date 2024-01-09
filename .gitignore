@@ -52,3 +52,5 @@ mapping_network/nerf_embeddings
 mapping_network/inr_embeddings
 
 logs/
+
+TO_REMOVE_FROM_FINAL_RELEASE/

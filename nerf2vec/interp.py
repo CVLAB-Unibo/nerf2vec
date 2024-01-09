@@ -6,21 +6,21 @@ import uuid
 
 import tqdm
 import torch
-import wandb
-from classification import config_classifier as config
-from classification.train_nerf2vec import NeRFDataset
-from classification.utils import generate_rays, get_class_label_from_nerf_root_path, pose_spherical
+
+from nerf2vec import config as nerf2vec_config
+
+from nerf2vec.train_nerf2vec import NeRFDataset
+from nerf2vec.utils import generate_rays, get_class_label_from_nerf_root_path, pose_spherical
 from models.encoder import Encoder
 from models.idecoder import ImplicitDecoder
 from nerf.utils import Rays, namedtuple_map, render_image
 from nerf.intant_ngp import NGPradianceField
-from nerfacc import OccupancyGrid, contract_inv, ray_marching, render_visibility, rendering
+from nerfacc import ray_marching, rendering
 
 import numpy as np
 import imageio.v2 as imageio
 
 from torch.cuda.amp import autocast
-import torch.nn.functional as F
 
 
 def render_with_multiple_camera_poses(device, embeddings, decoder, renderings_root_path, scene_aabb, render_step_size, color_bkgds):
@@ -67,14 +67,14 @@ def baseline_interpolation(
     curr_bkgd,
     img_path):
 
-    radiance_field = NGPradianceField(**config.INSTANT_NGP_MLP_CONF).to(device)
+    radiance_field = NGPradianceField(**nerf2vec_config.INSTANT_NGP_MLP_CONF).to(device)
     radiance_field.eval()
 
-    scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
+    scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
         (scene_aabb[3:] - scene_aabb[:3]).max()
         * math.sqrt(3)
-        / config.GRID_CONFIG_N_SAMPLES
+        / nerf2vec_config.GRID_CONFIG_N_SAMPLES
     ).item()
 
     radiance_field.load_state_dict(ngp_mlp_weights)
@@ -205,18 +205,16 @@ def nerf2vec_baseline_comparisons(
 # TODO: a couple of new tasks has been added, without being very well structured in the current module.
 #       Therefore, it is necessary to do some refactoring.
 @torch.no_grad()
-def do_interpolation(device = 'cuda'):
-    scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
+def do_interpolation(device = 'cuda:0'):
+    scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
         (scene_aabb[3:] - scene_aabb[:3]).max()
         * math.sqrt(3)
-        / config.GRID_CONFIG_N_SAMPLES
+        / nerf2vec_config.GRID_CONFIG_N_SAMPLES
     ).item()
 
-    # TODO: decide which weight to load (best vs last)
-    # ckpt_path = ckpt_path / ""ckpts/best.pt""
 
-    ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
+    ckpts_path = Path(nerf2vec_config.CKPTS_PATH)
     ckpt_paths = [p for p in ckpts_path.glob("*.pt") if "best" not in p.name]
     ckpt_path = ckpt_paths[0]
     ckpt = torch.load(ckpt_path)
@@ -224,31 +222,31 @@ def do_interpolation(device = 'cuda'):
     print(f'loaded weights: {ckpt_path}')
 
     encoder = Encoder(
-                config.MLP_UNITS,
-                config.ENCODER_HIDDEN_DIM,
-                config.ENCODER_EMBEDDING_DIM
+                nerf2vec_config.MLP_UNITS,
+                nerf2vec_config.ENCODER_HIDDEN_DIM,
+                nerf2vec_config.ENCODER_EMBEDDING_DIM
                 )
     encoder.load_state_dict(ckpt["encoder"])
     encoder = encoder.cuda()
     encoder.eval()
 
     decoder = ImplicitDecoder(
-            embed_dim=config.ENCODER_EMBEDDING_DIM,
-            in_dim=config.DECODER_INPUT_DIM,
-            hidden_dim=config.DECODER_HIDDEN_DIM,
-            num_hidden_layers_before_skip=config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
-            num_hidden_layers_after_skip=config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
-            out_dim=config.DECODER_OUT_DIM,
-            encoding_conf=config.INSTANT_NGP_ENCODING_CONF,
-            aabb=torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
+            embed_dim=nerf2vec_config.ENCODER_EMBEDDING_DIM,
+            in_dim=nerf2vec_config.DECODER_INPUT_DIM,
+            hidden_dim=nerf2vec_config.DECODER_HIDDEN_DIM,
+            num_hidden_layers_before_skip=nerf2vec_config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
+            num_hidden_layers_after_skip=nerf2vec_config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
+            out_dim=nerf2vec_config.DECODER_OUT_DIM,
+            encoding_conf=nerf2vec_config.INSTANT_NGP_ENCODING_CONF,
+            aabb=torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
         )
     decoder.load_state_dict(ckpt["decoder"])
     decoder = decoder.cuda()
     decoder.eval()
 
-    split = 'train'
-    dset_json = os.path.abspath(os.path.join('data', f'{split}.json'))  
-    dset = NeRFDataset(dset_json, device='cpu')  
+    split = nerf2vec_config.TRAIN_SPLIT
+    dset_json_path = get_dset_json_path(split)
+    dset = NeRFDataset(dset_json_path, device='cpu')  
 
     n_images = 0
     max_images = 100
@@ -287,19 +285,16 @@ def do_interpolation(device = 'cuda'):
             embeddings.append(emb_interp)
         embeddings.append(embedding_B)
 
-        plots_path = f'plots_interp_{split}'
-        curr_folder_path = os.path.join(plots_path, str(uuid.uuid4()))    
+        curr_folder_path = os.path.join('nerf2vec', f'plots_{split}', str(uuid.uuid4()))    
         os.makedirs(curr_folder_path, exist_ok=True)
 
         rays = test_nerf_A['rays']
-        color_bkgds = test_nerf_A['color_bkgd']
         rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
+
+        # WHITE BACKGROUND
+        color_bkgds = torch.ones(test_nerf_A['color_bkgd'].shape)
         color_bkgds = color_bkgds.cuda()
 
-        # Force white color
-        # color_bkgds = torch.ones(color_bkgds.shape)
-        # color_bkgds = color_bkgds.cuda()
-        
         # Interpolation
         nerf2vec_baseline_comparisons(
             rays, 
@@ -327,3 +322,14 @@ def do_interpolation(device = 'cuda'):
         """
         
         n_images += 1
+
+def get_dset_json_path(split):
+    dset_json_path = nerf2vec_config.TRAIN_DSET_JSON
+
+    if split == nerf2vec_config.VAL_SPLIT:
+        dset_json_path = nerf2vec_config.VAL_DSET_JSON
+    else:
+        dset_json_path = nerf2vec_config.TEST_DSET_JSON
+    
+    
+    return dset_json_path

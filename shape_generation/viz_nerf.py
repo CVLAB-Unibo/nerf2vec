@@ -25,7 +25,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader, Dataset
 
-from classification import config_classifier as config
+from classification import config as config
 from models.idecoder import ImplicitDecoder
 from nerf.utils import Rays, render_image
 

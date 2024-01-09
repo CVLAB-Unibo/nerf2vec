@@ -6,7 +6,10 @@ from nerf2vec.retrieval import do_retrieval
 from nerf2vec.train_nerf2vec import Nerf2vecTrainer
 import torch
 
-cuda_idx = 2
+os.environ["WANDB_SILENT"] = "true"
+os.environ["WANDB_MODE"] = "disabled"
+
+cuda_idx = 0
 device_name = f'cuda:{cuda_idx}'
 torch.cuda.set_device(cuda_idx)
 
@@ -104,3 +107,5 @@ if __name__ == '__main__':
 
     # train_nerf2vec()
 
+    # train_completion()
+    # mapping_network_plot()

@@ -12,6 +12,8 @@ TEST_DSET_JSON = os.path.abspath(os.path.join('data', 'test.json'))
 CKPTS_PATH = os.path.join('nerf2vec', 'train', 'ckpts')
 ALL_CKPTS_PATH = os.path.join('nerf2vec', 'train', 'all_ckpts')
 
+EMBEDDINGS_DIR = os.path.join('classification', 'embeddings')  # TODO: THIS SHOULD BE SET DYNAMICALLY - CHANGE BEFORE RELEASE!
+
 """
 # ####################
 # NERF2VEC
@@ -118,6 +120,12 @@ WANDB_CONFIG = {
 }
 
 
-
-
+"""
+# ####################
+# DATASET
+# ####################
+"""
+TRAIN_SPLIT = 'train'
+VAL_SPLIT = 'val'
+TEST_SPLIT = 'test'
 

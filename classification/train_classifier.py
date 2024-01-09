@@ -1,13 +1,9 @@
 import copy
-import logging
-import os
-import sys
-from classification.utils import get_mlp_params_as_matrix
 import h5py
 import datetime
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 
@@ -18,14 +14,14 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader, Dataset
 
-from classification import config_classifier as config
+
 from models.fc_classifier import FcClassifier
 from torchmetrics.classification.accuracy import Accuracy
 
+from classification import config as classifier_config
+from nerf2vec import config as nerf2vec_config
+
 import wandb
-
-# import h5py
-
 
 class InrEmbeddingDataset(Dataset):
     def __init__(self, root: Path, split: str) -> None:
@@ -44,53 +40,43 @@ class InrEmbeddingDataset(Dataset):
             class_id = np.array(f.get("class_id"))
             class_id = torch.from_numpy(class_id).long()
             
-            """
-            data_dir = f["data_dir"][()].decode("utf-8")
-            weights_file_path = os.path.join(data_dir, config.NERF_WEIGHTS_FILE_NAME)
-
-            mlp_params = torch.load(weights_file_path, map_location=torch.device('cpu'))# ['mlp_base.params']
-            mlp_matrix = get_mlp_params_as_matrix(mlp_params['mlp_base.params'])
-            """
-            
-
         return embedding, class_id
-        # return mlp_params['mlp_base.params'], class_id
     
 class InrEmbeddingClassifier:
     def __init__(self, device='cuda:0') -> None:
 
-        dset_root = Path(config.EMBEDDINGS_DIR)
-        train_dset = InrEmbeddingDataset(dset_root, config.TRAIN_SPLIT)
+        dset_root = Path(nerf2vec_config.EMBEDDINGS_DIR)
+        train_dset = InrEmbeddingDataset(dset_root, nerf2vec_config.TRAIN_SPLIT)
 
-        train_bs = config.TRAIN_BS
+        train_bs = classifier_config.TRAIN_BS
         self.train_loader = DataLoader(train_dset, batch_size=train_bs, num_workers=8, shuffle=True)
 
-        val_bs = config.VAL_BS
-        val_dset = InrEmbeddingDataset(dset_root, config.VAL_SPLIT)
+        val_bs = classifier_config.VAL_BS
+        val_dset = InrEmbeddingDataset(dset_root, nerf2vec_config.VAL_SPLIT)
         self.val_loader = DataLoader(val_dset, batch_size=val_bs, num_workers=8)
 
-        test_dset = InrEmbeddingDataset(dset_root, config.TEST_SPLIT)
+        test_dset = InrEmbeddingDataset(dset_root, nerf2vec_config.TEST_SPLIT)
         self.test_loader = DataLoader(test_dset, batch_size=val_bs, num_workers=8)
 
-        layers_dim = config.LAYERS_DIM
-        self.num_classes = config.NUM_CLASSES
+        layers_dim = classifier_config.LAYERS_DIM
+        self.num_classes = classifier_config.NUM_CLASSES
         net = FcClassifier(layers_dim, self.num_classes)
         self.net = net.to(device)
 
-        self.optimizer = AdamW(self.net.parameters(), config.LR, weight_decay=config.WD)
-        num_steps = config.NUM_EPOCHS * len(self.train_loader)
-        self.scheduler = OneCycleLR(self.optimizer, config.LR, total_steps=num_steps)
+        self.optimizer = AdamW(self.net.parameters(), classifier_config.LR, weight_decay=classifier_config.WD)
+        num_steps = classifier_config.NUM_EPOCHS * len(self.train_loader)
+        self.scheduler = OneCycleLR(self.optimizer, classifier_config.LR, total_steps=num_steps)
 
         self.epoch = 0
         self.global_step = 0
         self.best_acc = 0.0
 
-        self.ckpts_path = Path(config.OUTPUT_DIR) / "ckpts"
+        self.ckpts_path = Path(classifier_config.OUTPUT_DIR) / "ckpts"
 
         if self.ckpts_path.exists():
             self.restore_from_last_ckpt()
 
-        self.ckpts_path.mkdir(exist_ok=True)
+        self.ckpts_path.mkdir(parents=True, exist_ok=True)
     
     def logfn(self, values: Dict[str, Any]) -> None:
         wandb.log(values, step=self.global_step, commit=False)
@@ -132,7 +118,7 @@ class InrEmbeddingClassifier:
         
         self.config_wandb()
 
-        num_epochs = config.NUM_EPOCHS
+        num_epochs = classifier_config.NUM_EPOCHS
         start_epoch = self.epoch
 
         for epoch in range(start_epoch, num_epochs):
@@ -223,7 +209,7 @@ class InrEmbeddingClassifier:
         conf_matrix = wandb.plot.confusion_matrix(
             probs=predictions.cpu().numpy(),
             y_true=labels.cpu().numpy(),
-            class_names=[str(i) for i in range(config.NUM_CLASSES)],
+            class_names=[str(i) for i in range(classifier_config.NUM_CLASSES)],
         )
         self.logfn({"conf_matrix": conf_matrix})
 
@@ -269,5 +255,5 @@ class InrEmbeddingClassifier:
             entity='dsr-lab',
             project='nerf2vec_classifier',
             name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
-            config=config.WANDB_CONFIG
+            config=classifier_config.WANDB_CONFIG
         )

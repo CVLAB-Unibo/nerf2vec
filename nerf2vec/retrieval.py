@@ -2,7 +2,7 @@ from collections import defaultdict
 import math
 import os
 import uuid
-from classification.export_renderings import get_rays
+from nerf2vec.utils import get_latest_checkpoints_path, get_rays
 import h5py
 
 from pathlib import Path
@@ -14,7 +14,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from classification import config_classifier as config
+from nerf2vec import config
 
 from sklearn.neighbors import KDTree
 
@@ -46,7 +46,7 @@ class InrEmbeddingDataset(Dataset):
 
 
 @torch.no_grad()
-def draw_images(decoder, embeddings, device='cuda:0'):
+def draw_images(decoder, embeddings, plots_path, device='cuda:0'):
 
     scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
@@ -56,7 +56,9 @@ def draw_images(decoder, embeddings, device='cuda:0'):
     ).item()
 
     rays = get_rays(device)
-    color_bkgd = torch.ones((1,3), device=device)  # WHITE BACKGROUND!
+
+    # WHITE BACKGROUND
+    color_bkgd = torch.ones((1,3), device=device)  
 
     img_name = str(uuid.uuid4())
 
@@ -75,7 +77,6 @@ def draw_images(decoder, embeddings, device='cuda:0'):
                             grid_weights=None
             )
 
-        plots_path = 'retrieval_plots'
         imageio.imwrite(
             os.path.join(plots_path, f'{img_name}_{idx}.png'),
             (rgb_A.squeeze(dim=0).cpu().detach().numpy() * 255).astype(np.uint8)
@@ -83,16 +84,15 @@ def draw_images(decoder, embeddings, device='cuda:0'):
 
 
 @torch.no_grad()
-def get_recalls(gallery: Tensor, labels_gallery: Tensor, kk: List[int], decoder) -> Dict[int, float]:
+def get_recalls(gallery: Tensor, 
+                labels_gallery: Tensor, 
+                kk: List[int], decoder,
+                plots_path: str) -> Dict[int, float]:
     max_nn = max(kk)
     recalls = {idx: 0.0 for idx in kk}
     targets = labels_gallery.cpu().numpy()
     gallery = gallery.cpu().numpy()
     tree = KDTree(gallery)
-
-    # shuffling_indices = torch.randperm(gallery.shape[0])
-    # gallery = gallery[shuffling_indices]
-    # labels_gallery = labels_gallery[shuffling_indices]
 
     dic_renderings = defaultdict(int)
 
@@ -104,8 +104,7 @@ def get_recalls(gallery: Tensor, labels_gallery: Tensor, kk: List[int], decoder)
 
             # Draw the query and the first 3 neighbours
             if dic_renderings[label_query] < 10:
-                # draw_images(decoder, gallery[indices_matched[:4]])
-                draw_images(decoder, gallery[indices_matched])
+                draw_images(decoder, gallery[indices_matched], plots_path)
                 dic_renderings[label_query] += 1
                 print(dic_renderings)
             
@@ -136,7 +135,7 @@ def do_retrieval(device='cuda:0'):
     decoder.eval()
     decoder = decoder.to(device)
 
-    ckpt_path = os.path.join('classification','train','ckpts','499.pt')
+    ckpt_path = get_latest_checkpoints_path(Path(config.CKPTS_PATH))
     print(f'loading weights: {ckpt_path}')
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
@@ -155,6 +154,9 @@ def do_retrieval(device='cuda:0'):
     embeddings = torch.stack(embeddings)
     labels = torch.stack(labels)
 
-    recalls = get_recalls(embeddings, labels, [1, 5, 10], decoder)
+    plots_path = os.path.join('nerf2vec', 'retrieval_plots')
+    os.makedirs(plots_path, exist_ok=True)
+
+    recalls = get_recalls(embeddings, labels, [1, 5, 10], decoder, plots_path)
     for key, value in recalls.items():
         print(f"Recall@{key} : {100. * value:.2f}%")

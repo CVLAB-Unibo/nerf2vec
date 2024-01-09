@@ -5,7 +5,7 @@ import random
 import time
 
 from nerfacc import OccupancyGrid
-from classification.utils import get_mlp_params_as_matrix
+from nerf2vec.utils import get_latest_checkpoints_path, get_mlp_params_as_matrix
 
 import os
 import torch
@@ -485,11 +485,7 @@ class Nerf2vecTrainer:
     
     def restore_from_last_ckpt(self) -> None:
         if self.ckpts_path.exists():
-            ckpt_paths = [p for p in self.ckpts_path.glob("*.pt") if "best" not in p.name]
-            error_msg = "Expected only one ckpt apart from best, found none or too many."
-            assert len(ckpt_paths) == 1, error_msg
-
-            ckpt_path = ckpt_paths[0]
+            ckpt_path = get_latest_checkpoints_path(self.ckpts_path)
             print(f'loading weights: {ckpt_path}')
             ckpt = torch.load(ckpt_path)
 
@@ -503,8 +499,8 @@ class Nerf2vecTrainer:
     
     def config_wandb(self):
         wandb.init(
-            entity='YOUR_PROJECT_ENTITY',
-            project='train_nerf2vec',
+            entity='entity',
+            project='nerf2vec',
             name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
             config=config.WANDB_CONFIG
         )
