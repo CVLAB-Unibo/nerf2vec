@@ -10,8 +10,9 @@ from torch import Tensor
 from nerf2vec.utils import get_class_label, get_mlp_params_as_matrix
 from models.encoder import Encoder
 
-from task_classification import config as config
-
+from task_classification import config as classification_config
+from nerf2vec import config as nerf2vec_config
+import paths
 import h5py
 
 
@@ -37,7 +38,7 @@ class InrDataset(Dataset):
         weights_file_path = os.path.join(data_dir, self.nerf_weights_file_name)
 
         class_label = get_class_label(weights_file_path)
-        class_id = config.LABELS_TO_IDS[get_class_label(weights_file_path)] if class_label != -1 else class_label
+        class_id = classification_config.LABELS_TO_IDS[get_class_label(weights_file_path)] if class_label != -1 else class_label
 
         matrix = torch.load(weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
@@ -61,21 +62,21 @@ def export_embeddings():
     device = 'cuda:0'
 
     train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
-    train_dset = InrDataset(train_dset_json, device='cpu', nerf_weights_file_name=config.NERF_WEIGHTS_FILE_NAME)
+    train_dset = InrDataset(train_dset_json, device='cpu', nerf_weights_file_name=nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
     train_loader = DataLoader(train_dset, batch_size=1, num_workers=0, shuffle=False)
 
     val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))
-    val_dset = InrDataset(val_dset_json, device='cpu', nerf_weights_file_name=config.NERF_WEIGHTS_FILE_NAME)
+    val_dset = InrDataset(val_dset_json, device='cpu', nerf_weights_file_name=nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
     val_loader = DataLoader(val_dset, batch_size=1, num_workers=0, shuffle=False)
 
     test_dset_json = os.path.abspath(os.path.join('data', 'test.json'))
-    test_dset = InrDataset(test_dset_json, device='cpu', nerf_weights_file_name=config.NERF_WEIGHTS_FILE_NAME)
+    test_dset = InrDataset(test_dset_json, device='cpu', nerf_weights_file_name=nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
     test_loader = DataLoader(test_dset, batch_size=1, num_workers=0, shuffle=False)
 
     encoder = Encoder(
-            config.MLP_UNITS,
-            config.ENCODER_HIDDEN_DIM,
-            config.ENCODER_EMBEDDING_DIM
+            nerf2vec_config.MLP_UNITS,
+            nerf2vec_config.ENCODER_HIDDEN_DIM,
+            nerf2vec_config.ENCODER_EMBEDDING_DIM
             )
     encoder = encoder.to(device)
     ckpt = load_nerf2vec_checkpoint()
@@ -83,7 +84,7 @@ def export_embeddings():
     encoder.eval()
     
     loaders = [train_loader, val_loader, test_loader]
-    splits = [config.TRAIN_SPLIT, config.VAL_SPLIT, config.TEST_SPLIT]
+    splits = [nerf2vec_config.TRAIN_SPLIT, nerf2vec_config.VAL_SPLIT, nerf2vec_config.TEST_SPLIT]
 
 
     for loader, split in zip(loaders, splits):
@@ -96,7 +97,7 @@ def export_embeddings():
             with torch.no_grad():
                 embeddings = encoder(matrices)
 
-            out_root = Path(config.EMBEDDINGS_DIR)
+            out_root = Path(paths.NERF2VEC_EMBEDDINGS_DIR)
             h5_path = out_root / Path(f"{split}") / f"{idx}.h5"
             h5_path.parent.mkdir(parents=True, exist_ok=True)
 

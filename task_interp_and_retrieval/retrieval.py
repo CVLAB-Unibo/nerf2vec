@@ -14,7 +14,8 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from nerf2vec import config
+from nerf2vec import config as nerf2vec_config
+import paths
 
 from sklearn.neighbors import KDTree
 
@@ -48,11 +49,11 @@ class InrEmbeddingDataset(Dataset):
 @torch.no_grad()
 def draw_images(decoder, embeddings, plots_path, device='cuda:0'):
 
-    scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
+    scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
         (scene_aabb[3:] - scene_aabb[:3]).max()
         * math.sqrt(3)
-        / config.GRID_CONFIG_N_SAMPLES
+        / nerf2vec_config.GRID_CONFIG_N_SAMPLES
     ).item()
 
     rays = get_rays(device)
@@ -123,25 +124,25 @@ def do_retrieval(device='cuda:0'):
 
     # Init nerf2vec 
     decoder = ImplicitDecoder(
-            embed_dim=config.ENCODER_EMBEDDING_DIM,
-            in_dim=config.DECODER_INPUT_DIM,
-            hidden_dim=config.DECODER_HIDDEN_DIM,
-            num_hidden_layers_before_skip=config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
-            num_hidden_layers_after_skip=config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
-            out_dim=config.DECODER_OUT_DIM,
-            encoding_conf=config.INSTANT_NGP_ENCODING_CONF,
-            aabb=torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
+            embed_dim=nerf2vec_config.ENCODER_EMBEDDING_DIM,
+            in_dim=nerf2vec_config.DECODER_INPUT_DIM,
+            hidden_dim=nerf2vec_config.DECODER_HIDDEN_DIM,
+            num_hidden_layers_before_skip=nerf2vec_config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
+            num_hidden_layers_after_skip=nerf2vec_config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
+            out_dim=nerf2vec_config.DECODER_OUT_DIM,
+            encoding_conf=nerf2vec_config.INSTANT_NGP_ENCODING_CONF,
+            aabb=torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
         )
     decoder.eval()
     decoder = decoder.to(device)
 
-    ckpt_path = get_latest_checkpoints_path(Path(config.CKPTS_PATH))
+    ckpt_path = get_latest_checkpoints_path(Path(paths.NERF2VEC_CKPTS_PATH))
     print(f'loading weights: {ckpt_path}')
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
     
-    split = config.TEST_SPLIT
-    dset_root = Path(config.EMBEDDINGS_DIR)
+    split = nerf2vec_config.TEST_SPLIT
+    dset_root = Path(paths.NERF2VEC_EMBEDDINGS_DIR)
     dset = InrEmbeddingDataset(dset_root, split)
 
     embeddings = []

@@ -10,7 +10,7 @@ from torch import Tensor
 from nerf2vec.utils import get_class_label, get_mlp_params_as_matrix
 from models.encoder import Encoder
 
-from task_classification import config as config
+from task_classification import config as classification_config
 
 import h5py
 
@@ -79,7 +79,7 @@ def export_embeddings_for_mapping():
     device = 'cuda:3'
 
     train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
-    train_dset = InrDataset(train_dset_json, device='cpu', nerf_weights_file_name=config.NERF_WEIGHTS_FILE_NAME)
+    train_dset = InrDataset(train_dset_json, device='cpu', nerf_weights_file_name=classification_config.NERF_WEIGHTS_FILE_NAME)
     train_loader = DataLoader(train_dset, batch_size=1, num_workers=0, shuffle=False)
 
     """
@@ -93,9 +93,9 @@ def export_embeddings_for_mapping():
     """
 
     encoder = Encoder(
-            config.MLP_UNITS,
-            config.ENCODER_HIDDEN_DIM,
-            config.ENCODER_EMBEDDING_DIM
+            classification_config.MLP_UNITS,
+            classification_config.ENCODER_HIDDEN_DIM,
+            classification_config.ENCODER_EMBEDDING_DIM
             )
     encoder = encoder.to(device)
     ckpt = load_nerf2vec_checkpoint()
@@ -103,7 +103,7 @@ def export_embeddings_for_mapping():
     encoder.eval()
     
     loaders = [train_loader]  # , val_loader, test_loader]
-    splits = [config.TRAIN_SPLIT]  #, config.VAL_SPLIT, config.TEST_SPLIT]
+    splits = [classification_config.TRAIN_SPLIT]  #, config.VAL_SPLIT, config.TEST_SPLIT]
 
 
     for loader, split in zip(loaders, splits):

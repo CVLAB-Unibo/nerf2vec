@@ -18,8 +18,9 @@ from torch.utils.data import DataLoader, Dataset
 from models.fc_classifier import FcClassifier
 from torchmetrics.classification.accuracy import Accuracy
 
-from task_classification import config as classifier_config
+from task_classification import config as classification_config
 from nerf2vec import config as nerf2vec_config
+import paths
 
 import wandb
 
@@ -45,33 +46,33 @@ class InrEmbeddingDataset(Dataset):
 class InrEmbeddingClassifier:
     def __init__(self, device='cuda:0') -> None:
 
-        dset_root = Path(nerf2vec_config.EMBEDDINGS_DIR)
+        dset_root = Path(paths.NERF2VEC_EMBEDDINGS_DIR)
         train_dset = InrEmbeddingDataset(dset_root, nerf2vec_config.TRAIN_SPLIT)
 
-        train_bs = classifier_config.TRAIN_BS
+        train_bs = classification_config.TRAIN_BS
         self.train_loader = DataLoader(train_dset, batch_size=train_bs, num_workers=8, shuffle=True)
 
-        val_bs = classifier_config.VAL_BS
+        val_bs = classification_config.VAL_BS
         val_dset = InrEmbeddingDataset(dset_root, nerf2vec_config.VAL_SPLIT)
         self.val_loader = DataLoader(val_dset, batch_size=val_bs, num_workers=8)
 
         test_dset = InrEmbeddingDataset(dset_root, nerf2vec_config.TEST_SPLIT)
         self.test_loader = DataLoader(test_dset, batch_size=val_bs, num_workers=8)
 
-        layers_dim = classifier_config.LAYERS_DIM
-        self.num_classes = classifier_config.NUM_CLASSES
+        layers_dim = classification_config.LAYERS_DIM
+        self.num_classes = classification_config.NUM_CLASSES
         net = FcClassifier(layers_dim, self.num_classes)
         self.net = net.to(device)
 
-        self.optimizer = AdamW(self.net.parameters(), classifier_config.LR, weight_decay=classifier_config.WD)
-        num_steps = classifier_config.NUM_EPOCHS * len(self.train_loader)
-        self.scheduler = OneCycleLR(self.optimizer, classifier_config.LR, total_steps=num_steps)
+        self.optimizer = AdamW(self.net.parameters(), classification_config.LR, weight_decay=classification_config.WD)
+        num_steps = classification_config.NUM_EPOCHS * len(self.train_loader)
+        self.scheduler = OneCycleLR(self.optimizer, classification_config.LR, total_steps=num_steps)
 
         self.epoch = 0
         self.global_step = 0
         self.best_acc = 0.0
 
-        self.ckpts_path = Path(classifier_config.OUTPUT_DIR) / "ckpts"
+        self.ckpts_path = Path(paths.CLASSIFICATION_OUTPUT_DIR) / "ckpts"
 
         if self.ckpts_path.exists():
             self.restore_from_last_ckpt()
@@ -118,7 +119,7 @@ class InrEmbeddingClassifier:
         
         self.config_wandb()
 
-        num_epochs = classifier_config.NUM_EPOCHS
+        num_epochs = classification_config.NUM_EPOCHS
         start_epoch = self.epoch
 
         for epoch in range(start_epoch, num_epochs):
@@ -209,7 +210,7 @@ class InrEmbeddingClassifier:
         conf_matrix = wandb.plot.confusion_matrix(
             probs=predictions.cpu().numpy(),
             y_true=labels.cpu().numpy(),
-            class_names=[str(i) for i in range(classifier_config.NUM_CLASSES)],
+            class_names=[str(i) for i in range(classification_config.NUM_CLASSES)],
         )
         self.logfn({"conf_matrix": conf_matrix})
 
@@ -255,5 +256,5 @@ class InrEmbeddingClassifier:
             entity='dsr-lab',
             project='nerf2vec_classifier',
             name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
-            config=classifier_config.WANDB_CONFIG
+            config=classification_config.WANDB_CONFIG
         )

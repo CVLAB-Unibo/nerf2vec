@@ -1,19 +1,3 @@
-import os
-
-"""
-# ####################
-# PATHS AND REFERENCES
-# ####################
-"""
-TRAIN_DSET_JSON = os.path.abspath(os.path.join('data', 'train.json'))
-VAL_DSET_JSON = os.path.abspath(os.path.join('data', 'validation.json'))  
-TEST_DSET_JSON = os.path.abspath(os.path.join('data', 'test.json'))  
-
-CKPTS_PATH = os.path.join('nerf2vec', 'train', 'ckpts')
-ALL_CKPTS_PATH = os.path.join('nerf2vec', 'train', 'all_ckpts')
-
-EMBEDDINGS_DIR = os.path.join('task_classification', 'embeddings')  # TODO: THIS SHOULD BE SET DYNAMICALLY - CHANGE BEFORE RELEASE!
-
 """
 # ####################
 # NERF2VEC

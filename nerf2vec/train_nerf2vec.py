@@ -20,12 +20,13 @@ from nerf.intant_ngp import NGPradianceField
 from pathlib import Path
 from typing import Any, Dict
 
-from nerf2vec import config
+from nerf2vec import config as nerf2vec_config
 from nerf.loader_gt import NeRFLoaderGT
 from nerf.utils import Rays, render_image, render_image_GT
 
 from torch.cuda.amp import autocast
 
+import paths
 import wandb
 
 class NeRFDataset(Dataset):
@@ -48,7 +49,7 @@ class NeRFDataset(Dataset):
 
         nerf_loader = NeRFLoaderGT(
             data_dir=data_dir,
-            num_rays=config.NUM_RAYS,
+            num_rays=nerf2vec_config.NUM_RAYS,
             device=self.device)
 
         nerf_loader.training = True
@@ -131,71 +132,71 @@ class Nerf2vecTrainer:
 
         self.device = device
 
-        train_dset = NeRFDataset(config.TRAIN_DSET_JSON, device='cpu') 
+        train_dset = NeRFDataset(paths.TRAIN_DSET_JSON, device='cpu') 
         self.train_loader = DataLoader(
             train_dset,
-            batch_size=config.BATCH_SIZE,
+            batch_size=nerf2vec_config.BATCH_SIZE,
             shuffle=True, 
             num_workers=8, 
             persistent_workers=False, 
             prefetch_factor=2
         )
 
-        val_dset = NeRFDataset(config.VAL_DSET_JSON, device='cpu')   
+        val_dset = NeRFDataset(paths.VAL_DSET_JSON, device='cpu')   
         self.val_loader = DataLoader(
             val_dset,
-            batch_size=config.BATCH_SIZE,
+            batch_size=nerf2vec_config.BATCH_SIZE,
             shuffle=False,
             num_workers=8, 
             persistent_workers=False
         )
         self.val_loader_shuffled = DataLoader(
             val_dset,
-            batch_size=config.BATCH_SIZE,
+            batch_size=nerf2vec_config.BATCH_SIZE,
             shuffle=True,
             num_workers=8, 
             persistent_workers=False
         )
         
         encoder = Encoder(
-            config.MLP_UNITS,
-            config.ENCODER_HIDDEN_DIM,
-            config.ENCODER_EMBEDDING_DIM
+            nerf2vec_config.MLP_UNITS,
+            nerf2vec_config.ENCODER_HIDDEN_DIM,
+            nerf2vec_config.ENCODER_EMBEDDING_DIM
         )
         self.encoder = encoder.to(self.device)
 
         decoder = ImplicitDecoder(
-            embed_dim=config.ENCODER_EMBEDDING_DIM,
-            in_dim=config.DECODER_INPUT_DIM,
-            hidden_dim=config.DECODER_HIDDEN_DIM,
-            num_hidden_layers_before_skip=config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
-            num_hidden_layers_after_skip=config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
-            out_dim=config.DECODER_OUT_DIM,
-            encoding_conf=config.INSTANT_NGP_ENCODING_CONF,
-            aabb=torch.tensor(config.GRID_AABB, dtype=torch.float32, device=self.device)
+            embed_dim=nerf2vec_config.ENCODER_EMBEDDING_DIM,
+            in_dim=nerf2vec_config.DECODER_INPUT_DIM,
+            hidden_dim=nerf2vec_config.DECODER_HIDDEN_DIM,
+            num_hidden_layers_before_skip=nerf2vec_config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
+            num_hidden_layers_after_skip=nerf2vec_config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
+            out_dim=nerf2vec_config.DECODER_OUT_DIM,
+            encoding_conf=nerf2vec_config.INSTANT_NGP_ENCODING_CONF,
+            aabb=torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=self.device)
         )
         self.decoder = decoder.to(self.device)
 
         occupancy_grid = OccupancyGrid(
-            roi_aabb=config.GRID_AABB,
-            resolution=config.GRID_RESOLUTION,
-            contraction_type=config.GRID_CONTRACTION_TYPE,
+            roi_aabb=nerf2vec_config.GRID_AABB,
+            resolution=nerf2vec_config.GRID_RESOLUTION,
+            contraction_type=nerf2vec_config.GRID_CONTRACTION_TYPE,
         )
         self.occupancy_grid = occupancy_grid.to(self.device)
         self.occupancy_grid.eval()
 
-        self.ngp_mlp = NGPradianceField(**config.INSTANT_NGP_MLP_CONF).to(device)
+        self.ngp_mlp = NGPradianceField(**nerf2vec_config.INSTANT_NGP_MLP_CONF).to(device)
         self.ngp_mlp.eval()
 
-        self.scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=self.device)
+        self.scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=self.device)
         self.render_step_size = (
             (self.scene_aabb[3:] - self.scene_aabb[:3]).max()
             * math.sqrt(3)
-            / config.GRID_CONFIG_N_SAMPLES
+            / nerf2vec_config.GRID_CONFIG_N_SAMPLES
         ).item()
 
-        lr = config.LR
-        wd = config.WD
+        lr = nerf2vec_config.LR
+        wd = nerf2vec_config.WD
         params = list(self.encoder.parameters())
         params.extend(self.decoder.parameters())
         
@@ -206,8 +207,8 @@ class Nerf2vecTrainer:
         self.global_step = 0
         self.best_psnr = float("-inf")
 
-        self.ckpts_path = Path(config.CKPTS_PATH)
-        self.all_ckpts_path = Path(config.ALL_CKPTS_PATH)
+        self.ckpts_path = Path(paths.NERF2VEC_CKPTS_PATH)
+        self.all_ckpts_path = Path(paths.NERF2VEC_ALL_CKPTS_PATH)
 
         if self.ckpts_path.exists():
             self.restore_from_last_ckpt()
@@ -222,7 +223,7 @@ class Nerf2vecTrainer:
 
         self.config_wandb()
 
-        num_epochs = config.NUM_EPOCHS
+        num_epochs = nerf2vec_config.NUM_EPOCHS
         start_epoch = self.epoch
         
         for epoch in range(start_epoch, num_epochs):
@@ -274,8 +275,8 @@ class Nerf2vecTrainer:
                         background_indices=background_indices
                     )
                     
-                    fg_loss = F.smooth_l1_loss(rgb, pixels) * config.FG_WEIGHT
-                    bg_loss = F.smooth_l1_loss(bg_rgb_pred, bg_rgb_label) * config.BG_WEIGHT
+                    fg_loss = F.smooth_l1_loss(rgb, pixels) * nerf2vec_config.FG_WEIGHT
+                    bg_loss = F.smooth_l1_loss(bg_rgb_pred, bg_rgb_label) * nerf2vec_config.BG_WEIGHT
                     loss = fg_loss + bg_loss
                     
                 self.optimizer.zero_grad()
@@ -358,8 +359,8 @@ class Nerf2vecTrainer:
                     background_indices=background_indices
                 )
                 
-                fg_mse = F.mse_loss(rgb, pixels) * config.FG_WEIGHT
-                bg_mse = F.mse_loss(bg_rgb_pred, bg_rgb_label) * config.BG_WEIGHT
+                fg_mse = F.mse_loss(rgb, pixels) * nerf2vec_config.FG_WEIGHT
+                bg_mse = F.mse_loss(bg_rgb_pred, bg_rgb_label) * nerf2vec_config.BG_WEIGHT
 
                 mse_bg = fg_mse + bg_mse
                 mse = F.mse_loss(rgb, pixels)
@@ -502,5 +503,5 @@ class Nerf2vecTrainer:
             entity='entity',
             project='nerf2vec',
             name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
-            config=config.WANDB_CONFIG
+            config=nerf2vec_config.WANDB_CONFIG
         )

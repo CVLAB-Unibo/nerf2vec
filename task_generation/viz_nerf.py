@@ -11,7 +11,8 @@ import numpy as np
 
 import torch
 
-from task_classification import config
+from nerf2vec import config as nerf2vec_config
+
 from models.idecoder import ImplicitDecoder
 from nerf.utils import Rays, render_image
 
@@ -22,11 +23,11 @@ from torch.cuda.amp import autocast
 @torch.no_grad()
 def draw_images(decoder, embeddings, device='cuda:0'):
 
-    scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
+    scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
         (scene_aabb[3:] - scene_aabb[:3]).max()
         * math.sqrt(3)
-        / config.GRID_CONFIG_N_SAMPLES
+        / nerf2vec_config.GRID_CONFIG_N_SAMPLES
     ).item()
 
     rays = get_rays(device)
@@ -61,14 +62,14 @@ def create_renderings_from_GAN_embeddings(device='cuda:0'):
 
     # Init nerf2vec 
     decoder = ImplicitDecoder(
-            embed_dim=config.ENCODER_EMBEDDING_DIM,
-            in_dim=config.DECODER_INPUT_DIM,
-            hidden_dim=config.DECODER_HIDDEN_DIM,
-            num_hidden_layers_before_skip=config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
-            num_hidden_layers_after_skip=config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
-            out_dim=config.DECODER_OUT_DIM,
-            encoding_conf=config.INSTANT_NGP_ENCODING_CONF,
-            aabb=torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
+            embed_dim=nerf2vec_config.ENCODER_EMBEDDING_DIM,
+            in_dim=nerf2vec_config.DECODER_INPUT_DIM,
+            hidden_dim=nerf2vec_config.DECODER_HIDDEN_DIM,
+            num_hidden_layers_before_skip=nerf2vec_config.DECODER_NUM_HIDDEN_LAYERS_BEFORE_SKIP,
+            num_hidden_layers_after_skip=nerf2vec_config.DECODER_NUM_HIDDEN_LAYERS_AFTER_SKIP,
+            out_dim=nerf2vec_config.DECODER_OUT_DIM,
+            encoding_conf=nerf2vec_config.INSTANT_NGP_ENCODING_CONF,
+            aabb=torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
         )
     decoder.eval()
     decoder = decoder.to(device)

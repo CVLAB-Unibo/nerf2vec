@@ -32,7 +32,8 @@ from nerf2vec.utils import generate_rays, pose_spherical
 
 from nerfacc import OccupancyGrid, contract_inv
 from nerf.intant_ngp import NGPradianceField
-from task_classification import config
+from nerf2vec import config as nerf2vec_config
+
 from torch.cuda.amp import autocast
 
 logging.disable(logging.INFO)
@@ -150,21 +151,21 @@ class CompletionTrainer:
         self.device = f'cuda:{cuda_idx}'
 
         occupancy_grid = OccupancyGrid(
-            roi_aabb=config.GRID_AABB,
-            resolution=config.GRID_RESOLUTION,
-            contraction_type=config.GRID_CONTRACTION_TYPE,
+            roi_aabb=nerf2vec_config.GRID_AABB,
+            resolution=nerf2vec_config.GRID_RESOLUTION,
+            contraction_type=nerf2vec_config.GRID_CONTRACTION_TYPE,
         )
         self.occupancy_grid = occupancy_grid.to(self.device)
         self.occupancy_grid.eval()
 
-        self.ngp_mlp = NGPradianceField(**config.INSTANT_NGP_MLP_CONF).to(self.device)
+        self.ngp_mlp = NGPradianceField(**nerf2vec_config.INSTANT_NGP_MLP_CONF).to(self.device)
         self.ngp_mlp.eval()
 
-        self.scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=self.device)
+        self.scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=self.device)
         self.render_step_size = (
             (self.scene_aabb[3:] - self.scene_aabb[:3]).max()
             * math.sqrt(3)
-            / config.GRID_CONFIG_N_SAMPLES
+            / nerf2vec_config.GRID_CONFIG_N_SAMPLES
         ).item()
 
         lr = hcfg("lr", float)
@@ -295,7 +296,7 @@ class CompletionTrainer:
         grids = []
         nerfs = []
         for nerf_data_dir in nerf_data_dirs:
-            nerf_path = os.path.join(nerf_data_dir, config.NERF_WEIGHTS_FILE_NAME)
+            nerf_path = os.path.join(nerf_data_dir, nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
             nerf = torch.load(nerf_path, map_location=torch.device('cpu'))  
             nerfs.append(nerf)
 

@@ -28,8 +28,6 @@ LR = 1e-4
 WD = 1e-2
 NUM_EPOCHS = 150
 
-OUTPUT_DIR = os.path.join('classification', 'classifier')
-
 
 # TODO: complete this dictionary
 WANDB_CONFIG = {

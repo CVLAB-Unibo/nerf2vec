@@ -5,6 +5,7 @@ from random import randint
 import uuid
 
 import torch
+import paths
 
 from nerf2vec import config as nerf2vec_config
 
@@ -63,7 +64,7 @@ def do_interpolation(device = 'cuda:0'):
     ).item()
 
 
-    ckpts_path = Path(nerf2vec_config.CKPTS_PATH)
+    ckpts_path = Path(paths.NERF2VEC_CKPTS_PATH)
     ckpt_paths = [p for p in ckpts_path.glob("*.pt") if "best" not in p.name]
     ckpt_path = ckpt_paths[0]
     ckpt = torch.load(ckpt_path)
@@ -160,12 +161,12 @@ def do_interpolation(device = 'cuda:0'):
         n_images += 1
 
 def get_dset_json_path(split):
-    dset_json_path = nerf2vec_config.TRAIN_DSET_JSON
+    dset_json_path = paths.TRAIN_DSET_JSON
 
     if split == nerf2vec_config.VAL_SPLIT:
-        dset_json_path = nerf2vec_config.VAL_DSET_JSON
+        dset_json_path = paths.VAL_DSET_JSON
     else:
-        dset_json_path = nerf2vec_config.TEST_DSET_JSON
+        dset_json_path = paths.TEST_DSET_JSON
     
     
     return dset_json_path

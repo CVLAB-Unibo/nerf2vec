@@ -1,44 +1,35 @@
 import math
 from random import randint
 import shutil
-import sys
 import uuid
 
 import tqdm
 
 # sys.path.append("..")
 
-import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 import h5py
 import numpy as np
 import torch
-import torch.nn.functional as F
-import wandb
-from hesiod import get_cfg_copy, get_out_dir, get_run_name, hcfg, hmain
-from pycarus.geometry.pcd import random_point_sampling, sample_pcds_from_udfs
-from pycarus.metrics.chamfer_distance import chamfer_t
-from pycarus.metrics.f_score import f_score
-from pycarus.utils import progress_bar
+from hesiod import hcfg, hmain
 from torch import Tensor
-from torch.optim import AdamW
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 from mapping_network.inr2vec_models.idecoder import ImplicitDecoder as INRDecoder
 from mapping_network.inr2vec_models.transfer import Transfer
 from models.idecoder import ImplicitDecoder as NeRFDecoder
 from nerf.utils import Rays, render_image, render_image_GT
-from task_classification.utils import generate_rays, pose_spherical
+from nerf2vec.utils import generate_rays, pose_spherical
 
-from nerfacc import OccupancyGrid, contract_inv
+from nerfacc import OccupancyGrid
 from nerf.intant_ngp import NGPradianceField
-from task_classification import config
+from nerf2vec import config as nerf2vec_config
+
 from torch.cuda.amp import autocast
 
-import open3d as o3d  # isort: skip
 import imageio.v2 as imageio
 
 
@@ -151,21 +142,21 @@ def mapping_network_plot() -> None:
         device = f'cuda:{cuda_idx}'
 
         occupancy_grid = OccupancyGrid(
-                roi_aabb=config.GRID_AABB,
-                resolution=config.GRID_RESOLUTION,
-                contraction_type=config.GRID_CONTRACTION_TYPE,
+                roi_aabb=nerf2vec_config.GRID_AABB,
+                resolution=nerf2vec_config.GRID_RESOLUTION,
+                contraction_type=nerf2vec_config.GRID_CONTRACTION_TYPE,
         )
         occupancy_grid = occupancy_grid.to(device)
         occupancy_grid.eval()
 
-        ngp_mlp = NGPradianceField(**config.INSTANT_NGP_MLP_CONF).to(device)
+        ngp_mlp = NGPradianceField(**nerf2vec_config.INSTANT_NGP_MLP_CONF).to(device)
         ngp_mlp.eval()
 
-        scene_aabb = torch.tensor(config.GRID_AABB, dtype=torch.float32, device=device)
+        scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
         render_step_size = (
                 (scene_aabb[3:] - scene_aabb[:3]).max()
                 * math.sqrt(3)
-                / config.GRID_CONFIG_N_SAMPLES
+                / nerf2vec_config.GRID_CONFIG_N_SAMPLES
         ).item()
         
         ckpt_path = "/media/data7/dsirocchi/nerf2vec/logs/completion/ckpts/299.pt"
@@ -185,7 +176,7 @@ def mapping_network_plot() -> None:
             
             embedding_nerf, nerf_data_dir, pcd, embedding_pcd, uuid_pcd = dset[idx]
             
-            nerf_path = os.path.join(nerf_data_dir, config.NERF_WEIGHTS_FILE_NAME)
+            nerf_path = os.path.join(nerf_data_dir, nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
             nerf = torch.load(nerf_path, map_location=torch.device('cpu'))  
             nerf['mlp_base.params'] = [nerf['mlp_base.params']]
 

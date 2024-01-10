@@ -9,7 +9,7 @@ from torch import Tensor
 import torch
 import numpy as np
 
-from nerf2vec import config
+from nerf2vec import config as nerf2vec_config
 from nerf.utils import Rays
 
 import torch.nn.functional as F
@@ -67,10 +67,10 @@ def get_mlp_params_as_matrix(flattened_params: Tensor, sd: Dict[str, Any] = None
 
 def get_mlp_sample_sd():
     sample_sd = OrderedDict()
-    sample_sd['input'] = torch.zeros(config.MLP_UNITS, next_multiple(config.MLP_INPUT_SIZE_AFTER_ENCODING, config.TINY_CUDA_MIN_SIZE))
-    for i in range(config.MLP_HIDDEN_LAYERS):
-        sample_sd[f'hid_{i}'] = torch.zeros(config.MLP_UNITS, config.MLP_UNITS)
-    sample_sd['output'] = torch.zeros(next_multiple(config.MLP_OUTPUT_SIZE, config.TINY_CUDA_MIN_SIZE), config.MLP_UNITS)
+    sample_sd['input'] = torch.zeros(nerf2vec_config.MLP_UNITS, next_multiple(nerf2vec_config.MLP_INPUT_SIZE_AFTER_ENCODING, nerf2vec_config.TINY_CUDA_MIN_SIZE))
+    for i in range(nerf2vec_config.MLP_HIDDEN_LAYERS):
+        sample_sd[f'hid_{i}'] = torch.zeros(nerf2vec_config.MLP_UNITS, nerf2vec_config.MLP_UNITS)
+    sample_sd['output'] = torch.zeros(next_multiple(nerf2vec_config.MLP_OUTPUT_SIZE, nerf2vec_config.TINY_CUDA_MIN_SIZE), nerf2vec_config.MLP_UNITS)
 
     return sample_sd
 
