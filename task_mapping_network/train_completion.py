@@ -1,14 +1,9 @@
 import math
-import sys
-
-import tqdm
-
-# sys.path.append("..")
 
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 import h5py
 import numpy as np
@@ -16,9 +11,7 @@ import torch
 import torch.nn.functional as F
 import wandb
 from hesiod import get_cfg_copy, get_out_dir, get_run_name, hcfg, hmain
-from pycarus.geometry.pcd import random_point_sampling, sample_pcds_from_udfs
-from pycarus.metrics.chamfer_distance import chamfer_t
-from pycarus.metrics.f_score import f_score
+from pycarus.geometry.pcd import random_point_sampling
 from pycarus.utils import progress_bar
 from torch import Tensor
 from torch.optim import AdamW
@@ -30,14 +23,12 @@ from models.idecoder import ImplicitDecoder as NeRFDecoder
 from nerf.utils import Rays, render_image, render_image_GT
 from nerf2vec.utils import generate_rays, pose_spherical
 
-from nerfacc import OccupancyGrid, contract_inv
+from nerfacc import OccupancyGrid
 from nerf.intant_ngp import NGPradianceField
 from nerf2vec import config as nerf2vec_config
 
-from torch.cuda.amp import autocast
 
 logging.disable(logging.INFO)
-os.environ["WANDB_SILENT"] = "true"
 
 
 class InrEmbeddingDataset(Dataset):

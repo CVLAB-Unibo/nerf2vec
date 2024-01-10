@@ -176,9 +176,6 @@ class InrsDatasetCreator:
                         global_idx += 1
 
 @hmain(base_cfg_dir="cfg/bases", template_cfg_file="mapping_network/cfg/inrs_dataset.yaml", create_out_dir=False)
-def main() -> None:
+def create() -> None:
     dset_creator = InrsDatasetCreator()
     dset_creator.create_dataset()
-
-if __name__ == "__main__":
-    main()

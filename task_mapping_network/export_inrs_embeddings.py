@@ -42,9 +42,7 @@ class InrDataset(Dataset):
     template_cfg_file="mapping_network/cfg/export_embeddings.yaml",
     create_out_dir=False,
 )
-def main() -> None:
-
-    torch.cuda.set_device(3)
+def export() -> None:
 
     inrs_root = Path(hcfg("inrs_root", str))
 
@@ -102,10 +100,6 @@ def main() -> None:
                 f.create_dataset("pcd", data=pcds[0].detach().cpu().numpy())
                 f.create_dataset("embedding", data=embedding[0].detach().cpu().numpy())
                 f.create_dataset("class_id", data=class_ids[0].detach().cpu().numpy())
-                f.create_dataset("uuid", data=uuids[0])  # TODO: CHECK THIS
+                f.create_dataset("uuid", data=uuids[0]) 
 
             idx += 1
-
-
-if __name__ == "__main__":
-    main()

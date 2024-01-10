@@ -5,8 +5,6 @@ from anyio import Path
 import open3d as o3d
 
 
-
-    
 def get_dataset_json(root:str, split: str):
         json_path = os.path.join(root, f'{split}.json')
         
