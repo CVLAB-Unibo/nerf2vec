@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader, Dataset
 from models.fc_classifier import FcClassifier
 from torchmetrics.classification.accuracy import Accuracy
 
-from classification import config as classifier_config
+from task_classification import config as classifier_config
 from nerf2vec import config as nerf2vec_config
 
 import wandb

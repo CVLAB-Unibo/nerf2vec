@@ -4,18 +4,18 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from task_generation import config
 
-def main() -> None:
+
+def export_embeddings() -> None:
     
-    # inr_embeddings_root = Path(sys.argv[1])
-    inr_embeddings_root = Path('/media/data4TB/sirocchi/nerf2vec/classification/embeddings/train')
-    out_root = Path('/media/data4TB/sirocchi/nerf2vec/shape_generation/latent_embeddings')
-    # out_root = Path(sys.argv[2])
+    nerf_embeddings_root = Path(config.NERF_EMBEDDING_PATH)
+    out_root = Path(config.GENERATION_EMBEDDING_PATH)
     out_root.mkdir(parents=True, exist_ok=True)
-    # num_classes = 40
+   
     num_classes = 13
 
-    embeddings_paths = list(inr_embeddings_root.glob("*.h5"))
+    embeddings_paths = list(nerf_embeddings_root.glob("*.h5"))
 
     embeddings = {}
     for cls in range(num_classes):
@@ -39,6 +39,3 @@ def main() -> None:
         stacked_embeddings = np.stack(embeddings[class_id])
         np.savez_compressed(path_out, embeddings=stacked_embeddings)
 
-
-if __name__ == "__main__":
-    main()

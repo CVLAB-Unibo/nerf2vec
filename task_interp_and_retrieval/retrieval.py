@@ -102,7 +102,7 @@ def get_recalls(gallery: Tensor,
             _, indices_matched = tree.query(query, k=max_nn + 1)
             indices_matched = indices_matched[0]
 
-            # Draw the query and the first 3 neighbours
+            # Draw the query and the first N neighbours
             if dic_renderings[label_query] < 10:
                 draw_images(decoder, gallery[indices_matched], plots_path)
                 dic_renderings[label_query] += 1
@@ -140,8 +140,9 @@ def do_retrieval(device='cuda:0'):
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
     
+    split = config.TEST_SPLIT
     dset_root = Path(config.EMBEDDINGS_DIR)
-    dset = InrEmbeddingDataset(dset_root, config.TEST_SPLIT)
+    dset = InrEmbeddingDataset(dset_root, split)
 
     embeddings = []
     labels = []
@@ -154,9 +155,10 @@ def do_retrieval(device='cuda:0'):
     embeddings = torch.stack(embeddings)
     labels = torch.stack(labels)
 
-    plots_path = os.path.join('nerf2vec', 'retrieval_plots')
+    plots_path = os.path.join('task_interp_and_retrieval', f'retrieval_plots_{split}')
     os.makedirs(plots_path, exist_ok=True)
 
+    # TODO: document this!
     recalls = get_recalls(embeddings, labels, [1, 5, 10], decoder, plots_path)
     for key, value in recalls.items():
         print(f"Recall@{key} : {100. * value:.2f}%")

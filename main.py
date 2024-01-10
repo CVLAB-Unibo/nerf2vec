@@ -1,7 +1,10 @@
 import os
-from classification.train_classifier import InrEmbeddingClassifier
-from nerf2vec.interp import do_interpolation
-from nerf2vec.retrieval import do_retrieval
+
+import nerf2vec.export_embeddings as nerf2vec_generic_embeddings
+import task_generation.export_embeddings as generation_embeddings
+from task_classification.train_classifier import InrEmbeddingClassifier
+from task_interp_and_retrieval.interp import do_interpolation
+from task_interp_and_retrieval.retrieval import do_retrieval
 
 from nerf2vec.train_nerf2vec import Nerf2vecTrainer
 import torch
@@ -16,6 +19,12 @@ torch.cuda.set_device(cuda_idx)
 def train_nerf2vec():
     nerf2vec = Nerf2vecTrainer(device=device_name)
     nerf2vec.train()
+
+def export_generic_embeddings():
+    nerf2vec_generic_embeddings.export_embeddings()
+
+def export_retrieval_for_generation():
+    generation_embeddings.export_embeddings()
 
 def train_classifier():
     classifier = InrEmbeddingClassifier()
@@ -45,9 +54,10 @@ def main():
     
     choices = {
         0: ['Train nerf2vec', train_nerf2vec],
-        1: ['Interpolate', execute_interpolation_task],
-        2: ['Retrieval', execute_retrieval_task],
-        3: ['Train classifier', train_classifier]
+        1: ['Export nerf2vec embeddings (necessary for classification and retrieval tasks)', export_generic_embeddings],
+        2: ['\nInterpolation', execute_interpolation_task],
+        3: ['Retrieval', execute_retrieval_task],
+        4: ['Train classifier', train_classifier]
     }
 
     while True:

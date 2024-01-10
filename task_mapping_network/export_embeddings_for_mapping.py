@@ -7,10 +7,10 @@ from torch.utils.data import DataLoader, Dataset
 
 from torch import Tensor
 
-from classification.utils import get_class_label, get_mlp_params_as_matrix
+from nerf2vec.utils import get_class_label, get_mlp_params_as_matrix
 from models.encoder import Encoder
 
-from classification import config as config
+from task_classification import config as config
 
 import h5py
 

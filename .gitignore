@@ -17,16 +17,14 @@ data/data_TRAINED_A1
 data/data_TRAINED_A2
 data/baseline_classifier_renderings
 
-DO_NOT*
-
 data/*_train.json
 data/*_validation.json
 data/*_test.json
 
-classification/classifier/*
-classification/classifier*
-classification/embeddings
-classification/embeddings*
+task_classification/classifier/*
+task_classification/classifier*
+task_classification/embeddings
+task_classification/embeddings*
 
 saved_plots/
 plots_interp_train/
@@ -42,14 +40,14 @@ baseline_classifier_renderings_multi_poses/
 _archive_old_trainings/
 
 GAN_plots/
-shape_generation/experiments/
-shape_generation/latent_embeddings/
+task_generation/experiments/
+task_generation/latent_embeddings/
 
-mapping_network/point_clouds/
-mapping_network/inrs*
+task_mapping_network/point_clouds/
+task_mapping_network/inrs*
 
-mapping_network/nerf_embeddings
-mapping_network/inr_embeddings
+task_mapping_network/nerf_embeddings
+task_mapping_network/inr_embeddings
 
 logs/
 

@@ -31,11 +31,11 @@ from mapping_network.inr2vec_models.idecoder import ImplicitDecoder as INRDecode
 from mapping_network.inr2vec_models.transfer import Transfer
 from models.idecoder import ImplicitDecoder as NeRFDecoder
 from nerf.utils import Rays, render_image, render_image_GT
-from classification.utils import generate_rays, pose_spherical
+from task_classification.utils import generate_rays, pose_spherical
 
 from nerfacc import OccupancyGrid, contract_inv
 from nerf.intant_ngp import NGPradianceField
-from classification import config
+from task_classification import config
 from torch.cuda.amp import autocast
 
 import open3d as o3d  # isort: skip

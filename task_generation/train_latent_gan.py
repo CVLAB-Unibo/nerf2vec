@@ -11,6 +11,8 @@ from latent_3d_points.src.in_out import PointCloudDataSet, create_dir
 from latent_3d_points.src.tf_utils import reset_tf_graph
 from latent_3d_points.src.w_gan_gp import W_GAN_GP
 
+from task_generation import config
+
 current_class_idx = 3
 
 experiment_name = "nerf2vec_{}".format(current_class_idx)
@@ -21,7 +23,7 @@ n_syn_samples = 1000  # how many synthetic samples to produce at each save step
 saver_step = np.hstack([np.array([1, 5, 10]), np.arange(50, n_epochs + 1, 50)])
 
 
-latent_codes = np.load("/media/data4TB/sirocchi/nerf2vec/shape_generation/latent_embeddings/embeddings_{}.npz".format(current_class_idx))["embeddings"]
+latent_codes = np.load("{}_{}.npz".format(config.GENERATION_EMBEDDING_PATH, current_class_idx))["embeddings"]
 latent_data = PointCloudDataSet(latent_codes)
 print(latent_data.num_examples)
 
@@ -50,7 +52,6 @@ gan = W_GAN_GP(
 )
 
 print("Start")
-# exit()
 
 for _ in range(n_epochs):
     loss, duration = gan._single_epoch_train(latent_data, batch_size, noise_params)
