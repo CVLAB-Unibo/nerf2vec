@@ -10,12 +10,12 @@ import paths
 
 def export_embeddings() -> None:
     
-    split = 'train'
+    split = 'train'  # TODO: document this variable
     nerf_embeddings_root = Path(paths.NERF2VEC_EMBEDDINGS_DIR) / split  # TODO: TEST THIS!
     out_root = Path(paths.GENERATION_EMBEDDING_DIR)
     out_root.mkdir(parents=True, exist_ok=True)
    
-    num_classes = 13
+    num_classes = 13  # TODO: get this class from configuration file!
 
     embeddings_paths = list(nerf_embeddings_root.glob("*.h5"))
 

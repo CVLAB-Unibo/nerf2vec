@@ -19,6 +19,7 @@ from nerf.utils import Rays, render_image
 import imageio.v2 as imageio
 from torch.cuda.amp import autocast
 
+import paths
 
 @torch.no_grad()
 def draw_images(decoder, embeddings, device='cuda:0'):
@@ -29,11 +30,13 @@ def draw_images(decoder, embeddings, device='cuda:0'):
         * math.sqrt(3)
         / nerf2vec_config.GRID_CONFIG_N_SAMPLES
     ).item()
-
     rays = get_rays(device)
-    color_bkgd = torch.ones((1,3), device=device)  # WHITE BACKGROUND!
 
+    # WHITE BACKGROUND
+    color_bkgd = torch.ones((1,3), device=device) 
+    
     img_name = str(uuid.uuid4())
+    plots_path = os.path.join('task_generation', 'GAN_plots') # TODO: check path
 
     for idx, emb in enumerate(embeddings):
         emb = torch.tensor(emb, device=device, dtype=torch.float32)
@@ -50,7 +53,6 @@ def draw_images(decoder, embeddings, device='cuda:0'):
                             grid_weights=None
             )
 
-        plots_path = 'GAN_plots'
         imageio.imwrite(
             os.path.join(plots_path, f'{img_name}_{idx}.png'),
             (rgb_A.squeeze(dim=0).cpu().detach().numpy() * 255).astype(np.uint8)
@@ -58,7 +60,7 @@ def draw_images(decoder, embeddings, device='cuda:0'):
 
 
 @torch.no_grad()
-def create_renderings_from_GAN_embeddings(device='cuda:0'):
+def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0):
 
     # Init nerf2vec 
     decoder = ImplicitDecoder(
@@ -74,12 +76,12 @@ def create_renderings_from_GAN_embeddings(device='cuda:0'):
     decoder.eval()
     decoder = decoder.to(device)
 
-    ckpt_path = os.path.join('classification','train','ckpts','499.pt')  # TODO: update path
+    ckpt_path = paths.GENERATION_NERF2VEC_FULL_CKPT_PATH  # TODO: check path
     print(f'loading weights: {ckpt_path}')
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
 
-    latent_gan_embeddings_path = "/media/data4TB/sirocchi/nerf2vec/shape_generation/experiments/nerf2vec_3/generated_embeddings/epoch_2000.npz" # TODO: update path
+    latent_gan_embeddings_path = paths.GENERATION_LATENT_GAN_FULL_CKPT_PATH.format(class_idx) # TODO: check path
     embeddings = np.load(latent_gan_embeddings_path)["embeddings"]
     embeddings = torch.from_numpy(embeddings)
 

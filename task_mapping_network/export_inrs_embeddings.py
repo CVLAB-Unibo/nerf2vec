@@ -11,7 +11,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from inr2vec_models.encoder import Encoder
-from inr2vec_utils import get_mlp_params_as_matrix
+from task_mapping_network.inr2vec.inr2vec_utils import get_mlp_params_as_matrix
 
 
 class InrDataset(Dataset):

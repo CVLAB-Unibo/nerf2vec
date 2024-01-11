@@ -1,3 +1,10 @@
+"""
+This module, `train_latent_gan.py`, is used to train a Generative Adversarial Network (GAN) on the latent codes of a given class. 
+The GAN consists of a generator and a discriminator, both with two layers, which are imported from the `latent_3d_points.src.generators_discriminators` module. 
+The training data is derived from the embeddings obtained by nerf2vec. 
+The output of the training process is stored in a directory specified by `paths.GENERATION_OUT_DIR`, with the directory name formatted to include the class index.
+"""
+
 ### To be used with the code from the repository https://github.com/optas/latent_3d_points
 
 import os.path as osp
@@ -11,18 +18,19 @@ from latent_3d_points.src.in_out import PointCloudDataSet, create_dir
 from latent_3d_points.src.tf_utils import reset_tf_graph
 from latent_3d_points.src.w_gan_gp import W_GAN_GP
 
-from task_generation import config
+import paths
 
-def train(current_class_idx=0):
-    experiment_name = "nerf2vec_{}".format(current_class_idx)
-    top_out_dir = "experiments/{}".format(experiment_name)
+
+def train(class_idx=0):
+
+    experiment_name = 'nerf2vec_{}'.format(class_idx)
+    top_out_dir = paths.GENERATION_OUT_DIR.format(experiment_name)
     embedding_size = 1024
     n_epochs = 2000
     n_syn_samples = 1000  # how many synthetic samples to produce at each save step
     saver_step = np.hstack([np.array([1, 5, 10]), np.arange(50, n_epochs + 1, 50)])
 
-
-    latent_codes = np.load("{}_{}.npz".format(config.GENERATION_EMBEDDING_PATH, current_class_idx))["embeddings"]
+    latent_codes = np.load("{}_{}.npz".format(paths.GENERATION_EMBEDDING_DIR, class_idx))["embeddings"]
     latent_data = PointCloudDataSet(latent_codes)
     print(latent_data.num_examples)
 
@@ -32,9 +40,9 @@ def train(current_class_idx=0):
     noise_params = {"mu": 0, "sigma": 0.2}
     beta = 0.5  # ADAM's momentum
 
-    train_dir = osp.join(top_out_dir, "latent_gan_ckpts")
+    train_dir = osp.join(top_out_dir, "latent_gan_ckpts")  # TODO: test this path
     create_dir(train_dir)
-    synthetic_data_out_dir = osp.join(top_out_dir, "generated_embeddings")
+    synthetic_data_out_dir = osp.join(top_out_dir, "generated_embeddings") # TODO: test this path
     create_dir(synthetic_data_out_dir)
 
     reset_tf_graph()

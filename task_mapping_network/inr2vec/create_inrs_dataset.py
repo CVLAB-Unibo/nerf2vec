@@ -23,7 +23,7 @@ from pycarus.utils import progress_bar
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 
-from inr2vec_utils import get_mlps_batched_params, mlp_batched_forward
+from task_mapping_network.inr2vec.inr2vec_utils import get_mlps_batched_params, mlp_batched_forward
 
 
 class InrsDatasetCreator:
