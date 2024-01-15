@@ -1,16 +1,26 @@
+import os
+import sys
+import settings
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
+
 import json
 import os
+from hesiod import hmain
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset
+from hesiod import get_cfg_copy, get_out_dir, get_run_name, hcfg, hmain
 
 from torch import Tensor
 
 from nerf2vec.utils import get_class_label, get_mlp_params_as_matrix
 from models.encoder import Encoder
 
-from task_classification import config as classification_config
+from nerf2vec import config as nerf2vec_config
+
 
 import h5py
 
@@ -22,7 +32,6 @@ class InrDataset(Dataset):
             self.nerf_paths = json.load(file)
             self.nerf_paths = sorted(self.nerf_paths)
         
-        # self.nerf_paths = self._get_nerf_paths('data\\data_TRAINED')
         assert isinstance(self.nerf_paths, list), 'The json file provided is not a list.'
 
         self.device = device
@@ -36,54 +45,48 @@ class InrDataset(Dataset):
         data_dir = self.nerf_paths[index]
         weights_file_path = os.path.join(data_dir, self.nerf_weights_file_name)
 
-        class_id = classification_config.LABELS_TO_IDS[get_class_label(weights_file_path)]
+        class_id = nerf2vec_config.LABELS_TO_IDS[get_class_label(weights_file_path)]
 
         matrix = torch.load(weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
 
         return matrix, class_id, data_dir
 
-def load_nerf2vec_checkpoint():
-    ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
-    ckpt_paths = [p for p in ckpts_path.glob("*.pt") if "best" not in p.name]
-    error_msg = "Expected only one ckpt apart from best, found none or too many."
-    assert len(ckpt_paths) == 1, error_msg
-    ckpt_path = ckpt_paths[0]
-    print(f'loading path: {ckpt_path}')
-    ckpt = torch.load(ckpt_path)
-    
-    return ckpt
-
+@hmain(
+    base_cfg_dir="cfg/bases",
+    template_cfg_file="mapping_network/cfg/export_embeddings.yaml",
+    create_out_dir=False,
+)
 def export_embeddings_for_mapping():
 
-    device = 'cuda:3'
+    device = settings.DEVICE_NAME
 
-    train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
-    train_dset = InrDataset(train_dset_json, device='cpu', nerf_weights_file_name=classification_config.NERF_WEIGHTS_FILE_NAME)
+    train_dset_json = hcfg("nerf2vec_train_json_path", str)
+    train_dset = InrDataset(train_dset_json, device='cpu', nerf_weights_file_name=nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
     train_loader = DataLoader(train_dset, batch_size=1, num_workers=0, shuffle=False)
 
     """
-    val_dset_json = os.path.abspath(os.path.join('data', 'validation.json'))
+    val_dset_json = settings.VAL_DSET_JSON
     val_dset = InrDataset(val_dset_json, device='cpu', nerf_weights_file_name=config.NERF_WEIGHTS_FILE_NAME)
     val_loader = DataLoader(val_dset, batch_size=1, num_workers=0, shuffle=False)
 
-    test_dset_json = os.path.abspath(os.path.join('data', 'test.json'))
+    test_dset_json = settings.TEST_DSET_JSON
     test_dset = InrDataset(test_dset_json, device='cpu', nerf_weights_file_name=config.NERF_WEIGHTS_FILE_NAME)
     test_loader = DataLoader(test_dset, batch_size=1, num_workers=0, shuffle=False)
     """
 
     encoder = Encoder(
-            classification_config.MLP_UNITS,
-            classification_config.ENCODER_HIDDEN_DIM,
-            classification_config.ENCODER_EMBEDDING_DIM
+            nerf2vec_config.MLP_UNITS,
+            nerf2vec_config.ENCODER_HIDDEN_DIM,
+            nerf2vec_config.ENCODER_EMBEDDING_DIM
             )
     encoder = encoder.to(device)
-    ckpt = load_nerf2vec_checkpoint()
+    ckpt = hcfg("nerf2vec_ckpt_path", str)
     encoder.load_state_dict(ckpt["encoder"])
     encoder.eval()
     
     loaders = [train_loader]  # , val_loader, test_loader]
-    splits = [classification_config.TRAIN_SPLIT]  #, config.VAL_SPLIT, config.TEST_SPLIT]
+    splits = [nerf2vec_config.TRAIN_SPLIT]  #, config.VAL_SPLIT, config.TEST_SPLIT]
 
 
     for loader, split in zip(loaders, splits):
@@ -96,7 +99,7 @@ def export_embeddings_for_mapping():
             with torch.no_grad():
                 embeddings = encoder(matrices)
 
-            out_root = Path('/media/data7/dsirocchi/nerf2vec/mapping_network/nerf_embeddings')  # TODO: MOVE THIS PATH
+            out_root = Path(hcfg("nerf_out_root", str))
             h5_path = out_root / Path(f"{split}") / f"{idx}.h5"
             h5_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -55,7 +55,6 @@ def export() -> None:
     train_dset = InrDataset(inrs_root, train_split, sample_sd)
     train_loader = DataLoader(train_dset, batch_size=1, num_workers=0, shuffle=False)
 
-    
     val_split = hcfg("val_split", str)
     val_dset = InrDataset(inrs_root, val_split, sample_sd)
     val_loader = DataLoader(val_dset, batch_size=1, num_workers=0, shuffle=False)
@@ -64,7 +63,6 @@ def export() -> None:
     test_dset = InrDataset(inrs_root, test_split, sample_sd)
     test_loader = DataLoader(test_dset, batch_size=1, num_workers=0, shuffle=False)
     
-
     encoder_cfg = hcfg("encoder", Dict[str, Any])
     encoder = Encoder(
         mlp_hdim,

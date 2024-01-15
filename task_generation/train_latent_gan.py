@@ -29,7 +29,7 @@ from task_generation.latent_3d_points.src.in_out import PointCloudDataSet, creat
 from task_generation.latent_3d_points.src.tf_utils import reset_tf_graph
 from task_generation.latent_3d_points.src.w_gan_gp import W_GAN_GP
 
-from task_classification import config as classification_config
+from nerf2vec import config as nerf2vec_config
 
 
 def train(class_idx=0):
@@ -88,7 +88,7 @@ def train(class_idx=0):
 
 def main() -> None:
     # Train a GAN for each class
-    for class_idx in range(classification_config.NUM_CLASSES):
+    for class_idx in range(nerf2vec_config.NUM_CLASSES):
         train(class_idx)
 
 if __name__ == "__main__":

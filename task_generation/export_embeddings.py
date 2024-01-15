@@ -5,7 +5,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
 
-from task_classification import config as classification_config
+from nerf2vec import config as nerf2vec_config
 
 from pathlib import Path
 
@@ -20,7 +20,7 @@ def export_embeddings() -> None:
     out_root = Path(settings.GENERATION_EMBEDDING_DIR)
     out_root.mkdir(parents=True, exist_ok=True)
    
-    num_classes = classification_config.NUM_CLASSES
+    num_classes = nerf2vec_config.NUM_CLASSES
 
     embeddings_paths = list(nerf_embeddings_root.glob("*.h5"))
 

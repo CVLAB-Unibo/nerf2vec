@@ -1,5 +1,7 @@
-inrs_dset_root: "/media/data7/dsirocchi/nerf2vec/mapping_network/inr_embeddings"
-nerfs_dset_root: "/media/data7/dsirocchi/nerf2vec/mapping_network/nerf_embeddings"
+# IMPORTANT: Use relative paths to the root of the project or absolute paths
+
+inrs_dset_root: "/media/data7/dsirocchi/nerf2vec/task_mapping_network/inr_embeddings"
+nerfs_dset_root: "/media/data7/dsirocchi/nerf2vec/task_mapping_network/nerf_embeddings"
 
 train_split: "train"
 train_bs: 256
@@ -12,7 +14,9 @@ test_split: "test"
 embedding_dim: 1024
 num_layers_transfer: 8
 
-decoder_ckpt_path: "/path/to/inr2vec/ckpt"
+nerf2vec_decoder_ckpt_path: "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt"
+inr2vec_decoder_ckpt_path: "/media/data7/dsirocchi/nerf2vec/task_mapping_network/inr2vec_weights/ckpts/299.pt"
+
 inr_decoder:
   input_dim: 3
   hidden_dim: 512

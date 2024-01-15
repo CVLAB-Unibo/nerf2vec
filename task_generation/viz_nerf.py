@@ -23,7 +23,7 @@ from nerf.utils import Rays, render_image
 import imageio.v2 as imageio
 from torch.cuda.amp import autocast
 
-from task_classification import config as classification_config
+from nerf2vec import config as nerf2vec_config
 
 
 @torch.no_grad()
@@ -83,12 +83,12 @@ def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0, n_images
     decoder.eval()
     decoder = decoder.to(device)
 
-    ckpt_path = settings.GENERATION_NERF2VEC_FULL_CKPT_PATH  # TODO: check path
+    ckpt_path = settings.GENERATION_NERF2VEC_FULL_CKPT_PATH  # TODO: test this path
     print(f'loading weights: {ckpt_path}')
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
 
-    latent_gan_embeddings_path = settings.GENERATION_LATENT_GAN_FULL_CKPT_PATH.format(class_idx) # TODO: check path
+    latent_gan_embeddings_path = settings.GENERATION_LATENT_GAN_FULL_CKPT_PATH.format(class_idx) # TODO: test this path
     embeddings = np.load(latent_gan_embeddings_path)["embeddings"]
     embeddings = torch.from_numpy(embeddings)
 
@@ -100,7 +100,7 @@ def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0, n_images
 
 def main() -> None:
     # Create renderings for each class
-    for class_idx in range(0, classification_config.NUM_CLASSES):
+    for class_idx in range(0, nerf2vec_config.NUM_CLASSES):
         create_renderings_from_GAN_embeddings(device=settings.DEVICE_NAME, class_idx=class_idx, n_images=10)
 
 if __name__ == "__main__":

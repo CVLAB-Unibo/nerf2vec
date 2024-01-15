@@ -66,7 +66,7 @@ class InrEmbeddingClassifier:
         self.test_loader = DataLoader(test_dset, batch_size=val_bs, num_workers=8)
 
         layers_dim = classification_config.LAYERS_DIM
-        self.num_classes = classification_config.NUM_CLASSES
+        self.num_classes = nerf2vec_config.NUM_CLASSES
         net = FcClassifier(layers_dim, self.num_classes)
         self.net = net.to(device)
 
@@ -216,7 +216,7 @@ class InrEmbeddingClassifier:
         conf_matrix = wandb.plot.confusion_matrix(
             probs=predictions.cpu().numpy(),
             y_true=labels.cpu().numpy(),
-            class_names=[str(i) for i in range(classification_config.NUM_CLASSES)],
+            class_names=[str(i) for i in range(nerf2vec_config.NUM_CLASSES)],
         )
         self.logfn({"conf_matrix": conf_matrix})
 

@@ -27,6 +27,8 @@ from nerfacc import OccupancyGrid
 from nerf.intant_ngp import NGPradianceField
 from nerf2vec import config as nerf2vec_config
 
+import settings
+
 
 logging.disable(logging.INFO)
 
@@ -101,7 +103,7 @@ class CompletionTrainer:
             inr_decoder_cfg["num_hidden_layers_after_skip"],
             inr_decoder_cfg["out_dim"],
         )
-        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"  # TODO: MOVE THIS PATH
+        inr_decoder_ckpt_path = hcfg('inr2vec_decoder_ckpt_path', str)
         inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
         inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
         self.inr_decoder = inr_decoder.cuda()
@@ -130,15 +132,15 @@ class CompletionTrainer:
         )
         nerf_decoder.eval()
         self.nerf_decoder = nerf_decoder.cuda()
-        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt" # TODO: MOVE THIS PATH
-        print(f'loading nerf2vec weights: {ckpt_path}')
-        ckpt = torch.load(ckpt_path)
+        nerf2vec_decoder_ckpt_path = hcfg('nerf2vec_decoder_ckpt_path', str)
+        print(f'loading nerf2vec weights: {nerf2vec_decoder_ckpt_path}')
+        ckpt = torch.load(nerf2vec_decoder_ckpt_path)
         self.nerf_decoder.load_state_dict(ckpt["decoder"])
         
         # ####################
         # NerfAcc 
         # ####################
-        self.device = f'cuda:{cuda_idx}'
+        self.device = settings.DEVICE_NAME
 
         occupancy_grid = OccupancyGrid(
             roi_aabb=nerf2vec_config.GRID_AABB,

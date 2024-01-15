@@ -16,7 +16,6 @@ from torch import Tensor
 from nerf2vec.utils import get_class_label, get_mlp_params_as_matrix
 from models.encoder import Encoder
 
-from task_classification import config as classification_config
 from nerf2vec import config as nerf2vec_config
 import h5py
 
@@ -43,7 +42,7 @@ class InrDataset(Dataset):
         weights_file_path = os.path.join(data_dir, self.nerf_weights_file_name)
 
         class_label = get_class_label(weights_file_path)
-        class_id = classification_config.LABELS_TO_IDS[get_class_label(weights_file_path)] if class_label != -1 else class_label
+        class_id = nerf2vec_config.LABELS_TO_IDS[get_class_label(weights_file_path)] if class_label != -1 else class_label
 
         matrix = torch.load(weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
