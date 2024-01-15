@@ -1,3 +1,10 @@
+import os
+import sys
+import settings
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
+
 import math
 import os
 from pathlib import Path
@@ -5,7 +12,6 @@ from random import randint
 import uuid
 
 import torch
-import paths
 
 from nerf2vec import config as nerf2vec_config
 
@@ -64,7 +70,7 @@ def do_interpolation(device = 'cuda:0'):
     ).item()
 
 
-    ckpts_path = Path(paths.NERF2VEC_CKPTS_PATH)
+    ckpts_path = Path(settings.NERF2VEC_CKPTS_PATH)
     ckpt_paths = [p for p in ckpts_path.glob("*.pt") if "best" not in p.name]
     ckpt_path = ckpt_paths[0]
     ckpt = torch.load(ckpt_path)
@@ -161,12 +167,12 @@ def do_interpolation(device = 'cuda:0'):
         n_images += 1
 
 def get_dset_json_path(split):
-    dset_json_path = paths.TRAIN_DSET_JSON
+    dset_json_path = settings.TRAIN_DSET_JSON
 
     if split == nerf2vec_config.VAL_SPLIT:
-        dset_json_path = paths.VAL_DSET_JSON
+        dset_json_path = settings.VAL_DSET_JSON
     else:
-        dset_json_path = paths.TEST_DSET_JSON
+        dset_json_path = settings.TEST_DSET_JSON
     
     
     return dset_json_path

@@ -1,6 +1,12 @@
+import os
+import sys
+import settings
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
+
 from collections import defaultdict
 import math
-import os
 import uuid
 from nerf2vec.utils import get_latest_checkpoints_path, get_rays
 import h5py
@@ -15,7 +21,6 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from nerf2vec import config as nerf2vec_config
-import paths
 
 from sklearn.neighbors import KDTree
 
@@ -136,13 +141,13 @@ def do_retrieval(device='cuda:0'):
     decoder.eval()
     decoder = decoder.to(device)
 
-    ckpt_path = get_latest_checkpoints_path(Path(paths.NERF2VEC_CKPTS_PATH))
+    ckpt_path = get_latest_checkpoints_path(Path(settings.NERF2VEC_CKPTS_PATH))
     print(f'loading weights: {ckpt_path}')
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
     
     split = nerf2vec_config.TEST_SPLIT
-    dset_root = Path(paths.NERF2VEC_EMBEDDINGS_DIR)
+    dset_root = Path(settings.NERF2VEC_EMBEDDINGS_DIR)
     dset = InrEmbeddingDataset(dset_root, split)
 
     embeddings = []

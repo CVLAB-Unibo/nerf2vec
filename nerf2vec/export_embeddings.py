@@ -1,5 +1,11 @@
-import json
 import os
+import sys
+import settings
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
+
+import json
 from pathlib import Path
 from typing import Any, Dict, Tuple
 import torch
@@ -12,7 +18,6 @@ from models.encoder import Encoder
 
 from task_classification import config as classification_config
 from nerf2vec import config as nerf2vec_config
-import paths
 import h5py
 
 
@@ -97,7 +102,7 @@ def export_embeddings():
             with torch.no_grad():
                 embeddings = encoder(matrices)
 
-            out_root = Path(paths.NERF2VEC_EMBEDDINGS_DIR)
+            out_root = Path(settings.NERF2VEC_EMBEDDINGS_DIR)
             h5_path = out_root / Path(f"{split}") / f"{idx}.h5"
             h5_path.parent.mkdir(parents=True, exist_ok=True)
 

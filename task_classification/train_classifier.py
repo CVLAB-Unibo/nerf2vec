@@ -1,3 +1,10 @@
+import os
+import sys
+import settings
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
+
 import copy
 import h5py
 import datetime
@@ -20,7 +27,6 @@ from torchmetrics.classification.accuracy import Accuracy
 
 from task_classification import config as classification_config
 from nerf2vec import config as nerf2vec_config
-import paths
 
 import wandb
 
@@ -46,7 +52,7 @@ class InrEmbeddingDataset(Dataset):
 class InrEmbeddingClassifier:
     def __init__(self, device='cuda:0') -> None:
 
-        dset_root = Path(paths.NERF2VEC_EMBEDDINGS_DIR)
+        dset_root = Path(settings.NERF2VEC_EMBEDDINGS_DIR)
         train_dset = InrEmbeddingDataset(dset_root, nerf2vec_config.TRAIN_SPLIT)
 
         train_bs = classification_config.TRAIN_BS
@@ -72,7 +78,7 @@ class InrEmbeddingClassifier:
         self.global_step = 0
         self.best_acc = 0.0
 
-        self.ckpts_path = Path(paths.CLASSIFICATION_OUTPUT_DIR) / "ckpts"
+        self.ckpts_path = Path(settings.CLASSIFICATION_OUTPUT_DIR) / "ckpts"
 
         if self.ckpts_path.exists():
             self.restore_from_last_ckpt()

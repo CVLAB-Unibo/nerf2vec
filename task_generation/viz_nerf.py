@@ -1,3 +1,10 @@
+import os
+import sys
+import settings
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
+
 import math
 import os
 from random import randint
@@ -19,7 +26,6 @@ from nerf.utils import Rays, render_image
 import imageio.v2 as imageio
 from torch.cuda.amp import autocast
 
-import paths
 
 @torch.no_grad()
 def draw_images(decoder, embeddings, device='cuda:0'):
@@ -76,12 +82,12 @@ def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0):
     decoder.eval()
     decoder = decoder.to(device)
 
-    ckpt_path = paths.GENERATION_NERF2VEC_FULL_CKPT_PATH  # TODO: check path
+    ckpt_path = settings.GENERATION_NERF2VEC_FULL_CKPT_PATH  # TODO: check path
     print(f'loading weights: {ckpt_path}')
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
 
-    latent_gan_embeddings_path = paths.GENERATION_LATENT_GAN_FULL_CKPT_PATH.format(class_idx) # TODO: check path
+    latent_gan_embeddings_path = settings.GENERATION_LATENT_GAN_FULL_CKPT_PATH.format(class_idx) # TODO: check path
     embeddings = np.load(latent_gan_embeddings_path)["embeddings"]
     embeddings = torch.from_numpy(embeddings)
 

@@ -1,3 +1,10 @@
+import os
+import sys
+import settings
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
+
 import datetime
 import json
 import math
@@ -7,7 +14,6 @@ import time
 from nerfacc import OccupancyGrid
 from nerf2vec.utils import get_latest_checkpoints_path, get_mlp_params_as_matrix
 
-import os
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -25,8 +31,6 @@ from nerf.loader_gt import NeRFLoaderGT
 from nerf.utils import Rays, render_image, render_image_GT
 
 from torch.cuda.amp import autocast
-
-import paths
 import wandb
 
 class NeRFDataset(Dataset):
@@ -132,7 +136,7 @@ class Nerf2vecTrainer:
 
         self.device = device
 
-        train_dset = NeRFDataset(paths.TRAIN_DSET_JSON, device='cpu') 
+        train_dset = NeRFDataset(settings.TRAIN_DSET_JSON, device='cpu') 
         self.train_loader = DataLoader(
             train_dset,
             batch_size=nerf2vec_config.BATCH_SIZE,
@@ -142,7 +146,7 @@ class Nerf2vecTrainer:
             prefetch_factor=2
         )
 
-        val_dset = NeRFDataset(paths.VAL_DSET_JSON, device='cpu')   
+        val_dset = NeRFDataset(settings.VAL_DSET_JSON, device='cpu')   
         self.val_loader = DataLoader(
             val_dset,
             batch_size=nerf2vec_config.BATCH_SIZE,
@@ -207,8 +211,8 @@ class Nerf2vecTrainer:
         self.global_step = 0
         self.best_psnr = float("-inf")
 
-        self.ckpts_path = Path(paths.NERF2VEC_CKPTS_PATH)
-        self.all_ckpts_path = Path(paths.NERF2VEC_ALL_CKPTS_PATH)
+        self.ckpts_path = Path(settings.NERF2VEC_CKPTS_PATH)
+        self.all_ckpts_path = Path(settings.NERF2VEC_ALL_CKPTS_PATH)
 
         if self.ckpts_path.exists():
             self.restore_from_last_ckpt()
@@ -505,3 +509,10 @@ class Nerf2vecTrainer:
             name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
             config=nerf2vec_config.WANDB_CONFIG
         )
+
+def main():
+    nerf2vec = Nerf2vecTrainer()
+    nerf2vec.train()
+
+if __name__ == "__main__":
+    main()

@@ -4,33 +4,37 @@ The GAN consists of a generator and a discriminator, both with two layers, which
 The training data is derived from the embeddings obtained by nerf2vec. 
 The output of the training process is stored in a directory specified by `paths.GENERATION_OUT_DIR`, with the directory name formatted to include the class index.
 """
+import os
+import sys
+import settings
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
 
 ### To be used with the code from the repository https://github.com/optas/latent_3d_points
 
 import os.path as osp
 
 import numpy as np
-from latent_3d_points.src.generators_discriminators import (
+from task_generation.latent_3d_points.src.generators_discriminators import (
     latent_code_discriminator_two_layers,
     latent_code_generator_two_layers,
 )
-from latent_3d_points.src.in_out import PointCloudDataSet, create_dir
-from latent_3d_points.src.tf_utils import reset_tf_graph
-from latent_3d_points.src.w_gan_gp import W_GAN_GP
-
-import paths
+from task_generation.latent_3d_points.src.in_out import PointCloudDataSet, create_dir
+from task_generation.latent_3d_points.src.tf_utils import reset_tf_graph
+from task_generation.latent_3d_points.src.w_gan_gp import W_GAN_GP
 
 
 def train(class_idx=0):
 
     experiment_name = 'nerf2vec_{}'.format(class_idx)
-    top_out_dir = paths.GENERATION_OUT_DIR.format(experiment_name)
+    top_out_dir = settings.GENERATION_OUT_DIR.format(experiment_name)
     embedding_size = 1024
     n_epochs = 2000
     n_syn_samples = 1000  # how many synthetic samples to produce at each save step
     saver_step = np.hstack([np.array([1, 5, 10]), np.arange(50, n_epochs + 1, 50)])
 
-    latent_codes = np.load("{}_{}.npz".format(paths.GENERATION_EMBEDDING_DIR, class_idx))["embeddings"]
+    latent_codes = np.load("{}_{}.npz".format(settings.GENERATION_EMBEDDING_DIR, class_idx))["embeddings"]
     latent_data = PointCloudDataSet(latent_codes)
     print(latent_data.num_examples)
 
