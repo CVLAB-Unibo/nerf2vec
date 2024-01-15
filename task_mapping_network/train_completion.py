@@ -342,10 +342,11 @@ class CompletionTrainer:
                 scene_aabb=self.scene_aabb,
                 render_step_size=self.render_step_size,
                 render_bkgd=color_bkgds.unsqueeze(dim=0),
-                grid_weights=None
+                grid_weights=None,
+                device=self.device
             )
-            print('render_image')
             
+            print('render_image')
             
             curr_grid_weights = {
                 '_roi_aabb': [grids[idx]['_roi_aabb']],

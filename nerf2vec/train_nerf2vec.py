@@ -277,7 +277,10 @@ class Nerf2vecTrainer:
                         render_step_size=self.render_step_size,
                         render_bkgd=color_bkgds,
                         grid_weights=grid_weights,
-                        background_indices=background_indices
+                        background_indices=background_indices,
+                        max_foreground_coordinates=nerf2vec_config.MAX_FOREGROUND_COORDINATES,
+                        max_background_coordinates=nerf2vec_config.MAX_BACKGROUND_COORDINATES,
+                        device=self.device
                     )
                     
                     fg_loss = F.smooth_l1_loss(rgb, pixels) * nerf2vec_config.FG_WEIGHT
@@ -361,7 +364,10 @@ class Nerf2vecTrainer:
                     render_step_size=self.render_step_size,
                     render_bkgd=color_bkgds,
                     grid_weights=grid_weights,
-                    background_indices=background_indices
+                    background_indices=background_indices,
+                    max_foreground_coordinates=nerf2vec_config.MAX_FOREGROUND_COORDINATES,
+                    max_background_coordinates=nerf2vec_config.MAX_BACKGROUND_COORDINATES,
+                    device=self.device
                 )
                 
                 fg_mse = F.mse_loss(rgb, pixels) * nerf2vec_config.FG_WEIGHT
@@ -444,7 +450,8 @@ class Nerf2vecTrainer:
                     scene_aabb=self.scene_aabb,
                     render_step_size=self.render_step_size,
                     render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
-                    grid_weights=curr_grid_weights
+                    grid_weights=curr_grid_weights,
+                    device=self.device
                 )
                 
                 rgb_A, alpha, _, _, _, _ = render_image(
@@ -455,7 +462,8 @@ class Nerf2vecTrainer:
                                 scene_aabb=self.scene_aabb,
                                 render_step_size=self.render_step_size,
                                 render_bkgd=color_bkgds[idx].unsqueeze(dim=0),
-                                grid_weights=None
+                                grid_weights=None,
+                                device=self.device
                 )
                 
                 gt_image = wandb.Image((pixels.to('cpu').detach().numpy()[idx] * 255).astype(np.uint8))

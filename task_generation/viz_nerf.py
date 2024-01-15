@@ -56,7 +56,8 @@ def draw_images(decoder, embeddings, device='cuda:0', class_idx=0):
                             scene_aabb=scene_aabb,
                             render_step_size=render_step_size,
                             render_bkgd=color_bkgd,
-                            grid_weights=None
+                            grid_weights=None,
+                            device=device
             )
 
         imageio.imwrite(

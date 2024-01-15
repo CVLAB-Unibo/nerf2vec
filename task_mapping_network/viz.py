@@ -29,6 +29,7 @@ from nerf2vec import config as nerf2vec_config
 from torch.cuda.amp import autocast
 
 import imageio.v2 as imageio
+import settings
 
 
 class InrEmbeddingDataset(Dataset):
@@ -72,209 +73,196 @@ class InrEmbeddingDataset(Dataset):
 )
 @torch.no_grad()
 def mapping_network_plot() -> None:
-    # with autocast():
-        cuda_idx = 3
-        torch.cuda.set_device(cuda_idx)
 
-        inrs_dset_root = Path(hcfg("inrs_dset_root", str))  
-        nerfs_dset_root = Path(hcfg("nerfs_dset_root", str))
+    inrs_dset_root = Path(hcfg("inrs_dset_root", str))  
+    nerfs_dset_root = Path(hcfg("nerfs_dset_root", str))
+    
+    split_name = 'train'
+    dset_root = hcfg(f"{split_name}_split", str)
+    dset = InrEmbeddingDataset(nerfs_dset_root, inrs_dset_root, dset_root)
+
+    embedding_dim = hcfg("embedding_dim", int)
+    num_layers = hcfg("num_layers_transfer", int)
+    transfer = Transfer(embedding_dim, num_layers)
+    transfer = transfer.cuda()
+
+    # ####################
+    # INR DECODER
+    # ####################
+    inr_decoder_cfg = hcfg("inr_decoder", Dict[str, Any])
+    inr_decoder = INRDecoder(
+            embedding_dim,
+            inr_decoder_cfg["input_dim"],
+            inr_decoder_cfg["hidden_dim"],
+            inr_decoder_cfg["num_hidden_layers_before_skip"],
+            inr_decoder_cfg["num_hidden_layers_after_skip"],
+            inr_decoder_cfg["out_dim"],
+    )
+    inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"  # TODO: MOVE THIS PATH
+    inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
+    inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
+    inr_decoder = inr_decoder.cuda()
+    inr_decoder.eval()
+
+    # ####################
+    # NeRF DECODER
+    # ####################
+    nerf_decoder_cfg = hcfg("nerf_decoder", Dict[str, Any])
+
+    INSTANT_NGP_ENCODING_CONF = {
+            "otype": "Frequency",
+            "n_frequencies": 24
+    }
+    GRID_AABB = [-0.7, -0.7, -0.7, 0.7, 0.7, 0.7]
+
+    nerf_decoder = NeRFDecoder(
+            embed_dim=embedding_dim,
+            in_dim=nerf_decoder_cfg["input_dim"],
+            hidden_dim=nerf_decoder_cfg["hidden_dim"],
+            num_hidden_layers_before_skip=nerf_decoder_cfg["num_hidden_layers_before_skip"],
+            num_hidden_layers_after_skip=nerf_decoder_cfg["num_hidden_layers_after_skip"],
+            out_dim=nerf_decoder_cfg["out_dim"],
+            encoding_conf=INSTANT_NGP_ENCODING_CONF,
+            aabb=torch.tensor(GRID_AABB, dtype=torch.float32).cuda()
+    )
+    nerf_decoder.eval()
+    nerf_decoder = nerf_decoder.cuda()
+    ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt" # TODO: MOVE THIS PATH
+    print(f'loading nerf2vec weights: {ckpt_path}')
+    ckpt = torch.load(ckpt_path)
+    nerf_decoder.load_state_dict(ckpt["decoder"])
+
+    # ####################
+    # NerfAcc 
+    # ####################
+    device = settings.DEVICE_NAME
+
+    occupancy_grid = OccupancyGrid(
+            roi_aabb=nerf2vec_config.GRID_AABB,
+            resolution=nerf2vec_config.GRID_RESOLUTION,
+            contraction_type=nerf2vec_config.GRID_CONTRACTION_TYPE,
+    )
+    occupancy_grid = occupancy_grid.to(device)
+    occupancy_grid.eval()
+
+    ngp_mlp = NGPradianceField(**nerf2vec_config.INSTANT_NGP_MLP_CONF).to(device)
+    ngp_mlp.eval()
+
+    scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
+    render_step_size = (
+            (scene_aabb[3:] - scene_aabb[:3]).max()
+            * math.sqrt(3)
+            / nerf2vec_config.GRID_CONFIG_N_SAMPLES
+    ).item()
+    
+    ckpt_path = "/media/data7/dsirocchi/nerf2vec/logs/completion/ckpts/299.pt" # TODO: MOVE THIS PATH
+    ckpt = torch.load(ckpt_path)
+    embedding_dim = hcfg("embedding_dim", int)
+    num_layers = hcfg("num_layers_transfer", int)
+    transfer = Transfer(embedding_dim, num_layers)
+    transfer.load_state_dict(ckpt["net"])
+    transfer = transfer.cuda()
+    transfer.eval()
+    
+    n_generated_items = 0
+    while True:
+        idx = randint(0, len(dset) - 1)
+        print("Index:", idx)
+
         
-        split_name = 'train'
-        dset_root = hcfg(f"{split_name}_split", str)
-        dset = InrEmbeddingDataset(nerfs_dset_root, inrs_dset_root, dset_root)
+        embedding_nerf, nerf_data_dir, pcd, embedding_pcd, uuid_pcd = dset[idx]
+        
+        nerf_path = os.path.join(nerf_data_dir, nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
+        nerf = torch.load(nerf_path, map_location=torch.device('cpu'))  
+        nerf['mlp_base.params'] = [nerf['mlp_base.params']]
 
-        embedding_dim = hcfg("embedding_dim", int)
-        num_layers = hcfg("num_layers_transfer", int)
-        transfer = Transfer(embedding_dim, num_layers)
-        transfer = transfer.cuda()
-
-        # ####################
-        # INR DECODER
-        # ####################
-        inr_decoder_cfg = hcfg("inr_decoder", Dict[str, Any])
-        inr_decoder = INRDecoder(
-                embedding_dim,
-                inr_decoder_cfg["input_dim"],
-                inr_decoder_cfg["hidden_dim"],
-                inr_decoder_cfg["num_hidden_layers_before_skip"],
-                inr_decoder_cfg["num_hidden_layers_after_skip"],
-                inr_decoder_cfg["out_dim"],
-        )
-        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"  # TODO: MOVE THIS PATH
-        inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
-        inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
-        inr_decoder = inr_decoder.cuda()
-        inr_decoder.eval()
-
-        # ####################
-        # NeRF DECODER
-        # ####################
-        nerf_decoder_cfg = hcfg("nerf_decoder", Dict[str, Any])
-
-        INSTANT_NGP_ENCODING_CONF = {
-                "otype": "Frequency",
-                "n_frequencies": 24
+        grid_weights_path = os.path.join(nerf_data_dir, 'grid.pth')  
+        grid = torch.load(grid_weights_path, map_location='cpu')
+        grid['_binary'] = grid['_binary'].to_dense()
+        n_total_cells = nerf2vec_config.GRID_NUMBER_OF_CELLS
+        grid['occs'] = torch.empty([n_total_cells]) 
+        grid = {
+            '_roi_aabb': [grid['_roi_aabb']],
+            '_binary': [grid['_binary']],
+            'resolution': [grid['resolution']],
+            'occs': [grid['occs']],
         }
-        GRID_AABB = [-0.7, -0.7, -0.7, 0.7, 0.7, 0.7]
-
-        nerf_decoder = NeRFDecoder(
-                embed_dim=embedding_dim,
-                in_dim=nerf_decoder_cfg["input_dim"],
-                hidden_dim=nerf_decoder_cfg["hidden_dim"],
-                num_hidden_layers_before_skip=nerf_decoder_cfg["num_hidden_layers_before_skip"],
-                num_hidden_layers_after_skip=nerf_decoder_cfg["num_hidden_layers_after_skip"],
-                out_dim=nerf_decoder_cfg["out_dim"],
-                encoding_conf=INSTANT_NGP_ENCODING_CONF,
-                aabb=torch.tensor(GRID_AABB, dtype=torch.float32).cuda()
-        )
-        nerf_decoder.eval()
-        nerf_decoder = nerf_decoder.cuda()
-        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt" # TODO: MOVE THIS PATH
-        print(f'loading nerf2vec weights: {ckpt_path}')
-        ckpt = torch.load(ckpt_path)
-        nerf_decoder.load_state_dict(ckpt["decoder"])
-
-        # ####################
-        # NerfAcc 
-        # ####################
-        device = f'cuda:{cuda_idx}'
-
-        occupancy_grid = OccupancyGrid(
-                roi_aabb=nerf2vec_config.GRID_AABB,
-                resolution=nerf2vec_config.GRID_RESOLUTION,
-                contraction_type=nerf2vec_config.GRID_CONTRACTION_TYPE,
-        )
-        occupancy_grid = occupancy_grid.to(device)
-        occupancy_grid.eval()
-
-        ngp_mlp = NGPradianceField(**nerf2vec_config.INSTANT_NGP_MLP_CONF).to(device)
-        ngp_mlp.eval()
-
-        scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
-        render_step_size = (
-                (scene_aabb[3:] - scene_aabb[:3]).max()
-                * math.sqrt(3)
-                / nerf2vec_config.GRID_CONFIG_N_SAMPLES
-        ).item()
         
-        ckpt_path = "/media/data7/dsirocchi/nerf2vec/logs/completion/ckpts/299.pt" # TODO: MOVE THIS PATH
-        ckpt = torch.load(ckpt_path)
-        embedding_dim = hcfg("embedding_dim", int)
-        num_layers = hcfg("num_layers_transfer", int)
-        transfer = Transfer(embedding_dim, num_layers)
-        transfer.load_state_dict(ckpt["net"])
-        transfer = transfer.cuda()
-        transfer.eval()
+        embedding_pcd = embedding_pcd.unsqueeze(0).cuda()
+        embedding_nerf = embedding_nerf.unsqueeze(0).cuda()
+
+        with torch.no_grad():
+            embeddings_transfer = transfer(embedding_pcd)
         
-        n_generated_items = 0
-        while True:
-            idx = randint(0, len(dset) - 1)
-            print("Index:", idx)
+        # TODO: comment these?
+        # NeRF rendering parameters
+        width = 224
+        height = 224
+        camera_angle_x = 0.8575560450553894 # Parameter taken from traned NeRFs
+        focal_length = 0.5 * width / np.tan(0.5 * camera_angle_x)
 
-            
-            embedding_nerf, nerf_data_dir, pcd, embedding_pcd, uuid_pcd = dset[idx]
-            
-            nerf_path = os.path.join(nerf_data_dir, nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
-            nerf = torch.load(nerf_path, map_location=torch.device('cpu'))  
-            nerf['mlp_base.params'] = [nerf['mlp_base.params']]
+        max_images = 3
+        array = [-30, -30, -30]
 
-            grid_weights_path = os.path.join(nerf_data_dir, 'grid.pth')  
-            grid = torch.load(grid_weights_path, map_location='cpu')
-            grid['_binary'] = grid['_binary'].to_dense()
-            n_total_cells = nerf2vec_config.GRID_NUMBER_OF_CELLS
-            grid['occs'] = torch.empty([n_total_cells]) 
-            grid = {
-                '_roi_aabb': [grid['_roi_aabb']],
-                '_binary': [grid['_binary']],
-                'resolution': [grid['resolution']],
-                'occs': [grid['occs']],
-            }
-            
-            embedding_pcd = embedding_pcd.unsqueeze(0).cuda()
-            embedding_nerf = embedding_nerf.unsqueeze(0).cuda()
+        color_bkgds = torch.ones((1,3)) 
+        color_bkgds = color_bkgds.cuda()
 
-            with torch.no_grad():
-                embeddings_transfer = transfer(embedding_pcd)
+        plots_path = os.path.join('mapping_network', 'completion')
+        renderings_root_path = os.path.join(plots_path, str(uuid.uuid4()))   
+        os.makedirs(renderings_root_path, exist_ok=True) 
 
-
-            # NeRF rendering parameters
-            width = 224
-            height = 224
-            camera_angle_x = 0.8575560450553894 # Parameter taken from traned NeRFs
-            focal_length = 0.5 * width / np.tan(0.5 * camera_angle_x)
-
-            max_images = 3
-            array = [-30, -30, -30]
-
-            color_bkgds = torch.ones((1,3)) 
-            color_bkgds = color_bkgds.cuda()
-
-            plots_path = os.path.join('mapping_network', 'completion')
-            renderings_root_path = os.path.join(plots_path, str(uuid.uuid4()))   
-            os.makedirs(renderings_root_path, exist_ok=True) 
-
-            for n_img, theta in tqdm.tqdm(enumerate(np.linspace(0.0, 360.0, max_images, endpoint=False))):
-                c2w = pose_spherical(torch.tensor(theta), torch.tensor(array[n_img]), torch.tensor(1.5))
-                c2w = c2w.to(device)
-                rays = generate_rays(device, width, height, focal_length, c2w)
-                with autocast():
-                    rgb_pred, _, _, _, _, _ = render_image(
-                        radiance_field=nerf_decoder,
-                        embeddings=embeddings_transfer,
-                        occupancy_grid=None,
-                        rays=Rays(origins=rays.origins.unsqueeze(dim=0), viewdirs=rays.viewdirs.unsqueeze(dim=0)),
-                        scene_aabb=scene_aabb,
-                        render_step_size=render_step_size,
-                        render_bkgd=color_bkgds.unsqueeze(dim=0),
-                        grid_weights=None
-                    )
-                
-                    """
-                    curr_grid_weights = {
-                        '_roi_aabb': [grids[idx]['_roi_aabb']],
-                        '_binary': [grids[idx]['_binary']],
-                        'resolution': [grids[idx]['resolution']],
-                        'occs': [grids[idx]['occs']],
-                    }
-                    
-                    nerfs[idx]['mlp_base.params'] = [nerfs[idx]['mlp_base.params']]
-                    """
-                
-                    rgb_gt, _, _ = render_image_GT(
-                        radiance_field=ngp_mlp, 
-                        occupancy_grid=occupancy_grid, 
-                        rays=Rays(origins=rays.origins.unsqueeze(dim=0), viewdirs=rays.viewdirs.unsqueeze(dim=0)), 
-                        scene_aabb=scene_aabb, 
-                        render_step_size=render_step_size,
-                        color_bkgds=color_bkgds.unsqueeze(dim=0),
-                        grid_weights=grid,
-                        ngp_mlp_weights=nerf,
-                        device=device,
-                        training=False
-                    )
-                                
-                
-                full_path = os.path.join(renderings_root_path, f'nerf_pred_{n_img}.png')        
-                imageio.imwrite(
-                    full_path,
-                    (rgb_pred.cpu().detach().numpy()[0] * 255).astype(np.uint8)
+        for n_img, theta in tqdm.tqdm(enumerate(np.linspace(0.0, 360.0, max_images, endpoint=False))):
+            c2w = pose_spherical(torch.tensor(theta), torch.tensor(array[n_img]), torch.tensor(1.5))
+            c2w = c2w.to(device)
+            rays = generate_rays(device, width, height, focal_length, c2w)
+            with autocast():
+                rgb_pred, _, _, _, _, _ = render_image(
+                    radiance_field=nerf_decoder,
+                    embeddings=embeddings_transfer,
+                    occupancy_grid=None,
+                    rays=Rays(origins=rays.origins.unsqueeze(dim=0), viewdirs=rays.viewdirs.unsqueeze(dim=0)),
+                    scene_aabb=scene_aabb,
+                    render_step_size=render_step_size,
+                    render_bkgd=color_bkgds.unsqueeze(dim=0),
+                    grid_weights=None,
+                    device=device
                 )
-
-                full_path = os.path.join(renderings_root_path, f'nerf_gt_{n_img}.png')        
-                imageio.imwrite(
-                    full_path,
-                    (rgb_gt.cpu().detach().numpy()[0] * 255).astype(np.uint8)
+            
+                rgb_gt, _, _ = render_image_GT(
+                    radiance_field=ngp_mlp, 
+                    occupancy_grid=occupancy_grid, 
+                    rays=Rays(origins=rays.origins.unsqueeze(dim=0), viewdirs=rays.viewdirs.unsqueeze(dim=0)), 
+                    scene_aabb=scene_aabb, 
+                    render_step_size=render_step_size,
+                    color_bkgds=color_bkgds.unsqueeze(dim=0),
+                    grid_weights=grid,
+                    ngp_mlp_weights=nerf,
+                    device=device,
+                    training=False
                 )
-                
-            pcd_root_path = '/media/data7/dsirocchi/nerf2vec/mapping_network/point_clouds'  # TODO: MOVE THIS PATH
-            nerf_path = Path(nerf_data_dir)
-            pcd_source_path = os.path.join(pcd_root_path, nerf_path.parts[-2], split_name, f'{nerf_path.parts[-1]}.ply')
-            pcd_destination_path = os.path.join(renderings_root_path, f'{nerf_path.parts[-2]}_{nerf_path.parts[-1]}.ply')
-            shutil.copy(pcd_source_path, pcd_destination_path)
+                            
+            
+            full_path = os.path.join(renderings_root_path, f'nerf_pred_{n_img}.png')        
+            imageio.imwrite(
+                full_path,
+                (rgb_pred.cpu().detach().numpy()[0] * 255).astype(np.uint8)
+            )
 
-            n_generated_items += 1
+            full_path = os.path.join(renderings_root_path, f'nerf_gt_{n_img}.png')        
+            imageio.imwrite(
+                full_path,
+                (rgb_gt.cpu().detach().numpy()[0] * 255).astype(np.uint8)
+            )
+            
+        pcd_root_path = '/media/data7/dsirocchi/nerf2vec/mapping_network/point_clouds'  # TODO: MOVE THIS PATH
+        nerf_path = Path(nerf_data_dir)
+        pcd_source_path = os.path.join(pcd_root_path, nerf_path.parts[-2], split_name, f'{nerf_path.parts[-1]}.ply')
+        pcd_destination_path = os.path.join(renderings_root_path, f'{nerf_path.parts[-2]}_{nerf_path.parts[-1]}.ply')
+        shutil.copy(pcd_source_path, pcd_destination_path)
 
-            print(f'generated: {n_generated_items} elements')
+        n_generated_items += 1
 
-            if n_generated_items >= 200:
-                break
+        print(f'generated: {n_generated_items} elements')
+
+        if n_generated_items >= 200:
+            break

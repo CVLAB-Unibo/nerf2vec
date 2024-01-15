@@ -52,7 +52,7 @@ class InrEmbeddingDataset(Dataset):
 
 
 @torch.no_grad()
-def draw_images(decoder, embeddings, plots_path, device='cuda:0'):
+def draw_images(decoder, embeddings, plots_path, device):
 
     scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
@@ -80,7 +80,8 @@ def draw_images(decoder, embeddings, plots_path, device='cuda:0'):
                             scene_aabb=scene_aabb,
                             render_step_size=render_step_size,
                             render_bkgd=color_bkgd,
-                            grid_weights=None
+                            grid_weights=None,
+                            device=device
             )
 
         imageio.imwrite(
@@ -93,7 +94,8 @@ def draw_images(decoder, embeddings, plots_path, device='cuda:0'):
 def get_recalls(gallery: Tensor, 
                 labels_gallery: Tensor, 
                 kk: List[int], decoder,
-                plots_path: str) -> Dict[int, float]:
+                plots_path: str,
+                device:str) -> Dict[int, float]:
     max_nn = max(kk)
     recalls = {idx: 0.0 for idx in kk}
     targets = labels_gallery.cpu().numpy()
@@ -110,7 +112,7 @@ def get_recalls(gallery: Tensor,
 
             # Draw the query and the first N neighbours
             if dic_renderings[label_query] < 10:
-                draw_images(decoder, gallery[indices_matched], plots_path)
+                draw_images(decoder, gallery[indices_matched], plots_path, device)
                 dic_renderings[label_query] += 1
                 print(dic_renderings)
             
@@ -164,7 +166,7 @@ def do_retrieval(device='cuda:0'):
     plots_path = os.path.join('task_interp_and_retrieval', f'retrieval_plots_{split}')
     os.makedirs(plots_path, exist_ok=True)
 
-    recalls = get_recalls(embeddings, labels, [1, 5, 10], decoder, plots_path)
+    recalls = get_recalls(embeddings, labels, [1, 5, 10], decoder, plots_path, device)
     for key, value in recalls.items():
         print(f"Recall@{key} : {100. * value:.2f}%")
 

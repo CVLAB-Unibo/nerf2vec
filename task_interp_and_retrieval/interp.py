@@ -34,7 +34,8 @@ def draw_images(
         decoder,
         scene_aabb,
         render_step_size,
-        curr_folder_path):
+        curr_folder_path,
+        device):
 
     for idx in range(len(embeddings)):
         with autocast():
@@ -46,7 +47,8 @@ def draw_images(
                     scene_aabb=scene_aabb,
                     render_step_size=render_step_size,
                     render_bkgd=color_bkgds.unsqueeze(dim=0),
-                    grid_weights=None
+                    grid_weights=None,
+                    device=device
                 )
         
         img_name = f'{idx}.png'
@@ -159,7 +161,8 @@ def do_interpolation(device = 'cuda:0'):
             decoder,
             scene_aabb,
             render_step_size,
-            curr_folder_path
+            curr_folder_path,
+            device
         )
         
         n_images += 1
