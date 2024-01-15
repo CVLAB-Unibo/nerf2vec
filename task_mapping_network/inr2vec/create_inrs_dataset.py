@@ -73,7 +73,7 @@ class InrsDatasetCreator:
 
     def create_dataset(self) -> None:
 
-        torch.cuda.set_device(3)
+        torch.cuda.set_device(3)  # TODO: fix this
 
         for split in self.splits:
             global_idx = 0
@@ -175,3 +175,6 @@ class InrsDatasetCreator:
 def create() -> None:
     dset_creator = InrsDatasetCreator()
     dset_creator.create_dataset()
+
+if __name__ == "__main__":
+    create()

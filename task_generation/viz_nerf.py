@@ -1,9 +1,9 @@
 import os
 import sys
-import settings
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
+import settings
 
 import math
 from random import randint
@@ -41,7 +41,7 @@ def draw_images(decoder, embeddings, device='cuda:0', class_idx=0):
     color_bkgd = torch.ones((1,3), device=device) 
     
     img_name = str(uuid.uuid4())
-    plots_path = os.path.join('task_generation', f'GAN_plots_{class_idx}') # TODO: test this path
+    plots_path = os.path.join('task_generation', f'GAN_plots_{class_idx}')
     os.makedirs(plots_path, exist_ok=True)
 
     for idx, emb in enumerate(embeddings):
@@ -83,12 +83,12 @@ def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0, n_images
     decoder.eval()
     decoder = decoder.to(device)
 
-    ckpt_path = settings.GENERATION_NERF2VEC_FULL_CKPT_PATH  # TODO: test this path
+    ckpt_path = settings.GENERATION_NERF2VEC_FULL_CKPT_PATH
     print(f'loading weights: {ckpt_path}')
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
 
-    latent_gan_embeddings_path = settings.GENERATION_LATENT_GAN_FULL_CKPT_PATH.format(class_idx) # TODO: test this path
+    latent_gan_embeddings_path = settings.GENERATION_LATENT_GAN_FULL_CKPT_PATH.format(class_idx)
     embeddings = np.load(latent_gan_embeddings_path)["embeddings"]
     embeddings = torch.from_numpy(embeddings)
 

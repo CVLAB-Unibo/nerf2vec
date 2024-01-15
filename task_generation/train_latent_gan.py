@@ -13,10 +13,10 @@ The code in this module is based on the code from the repository: https://github
 """
 import os
 import sys
-import settings
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
+import settings
 
 import os.path as osp
 
@@ -51,9 +51,9 @@ def train(class_idx=0):
     noise_params = {"mu": 0, "sigma": 0.2}
     beta = 0.5  # ADAM's momentum
 
-    train_dir = osp.join(top_out_dir, "latent_gan_ckpts")  # TODO: test this path
+    train_dir = osp.join(top_out_dir, "latent_gan_ckpts")
     create_dir(train_dir)
-    synthetic_data_out_dir = osp.join(top_out_dir, "generated_embeddings") # TODO: test this path
+    synthetic_data_out_dir = osp.join(top_out_dir, "generated_embeddings")
     create_dir(synthetic_data_out_dir)
 
     reset_tf_graph()

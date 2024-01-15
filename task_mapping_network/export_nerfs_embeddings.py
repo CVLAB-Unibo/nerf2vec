@@ -1,9 +1,9 @@
 import os
 import sys
-import settings
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
+import settings
 
 import json
 import os
@@ -57,7 +57,7 @@ class InrDataset(Dataset):
     template_cfg_file="mapping_network/cfg/export_embeddings.yaml",
     create_out_dir=False,
 )
-def export_embeddings_for_mapping():
+def export_embeddings():
 
     device = settings.DEVICE_NAME
 
@@ -117,3 +117,6 @@ def export_embeddings_for_mapping():
 
             if idx % 5000 == 0:
                 print(f'Created {idx} embeddings for {split} split')
+
+if __name__ == "__main__":
+    export_embeddings()

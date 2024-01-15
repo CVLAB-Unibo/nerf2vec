@@ -1,7 +1,13 @@
+import os
+import sys
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.append(parent_dir)
+import settings
+
 import math
 
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -26,8 +32,6 @@ from nerf2vec.utils import generate_rays, pose_spherical
 from nerfacc import OccupancyGrid
 from nerf.intant_ngp import NGPradianceField
 from nerf2vec import config as nerf2vec_config
-
-import settings
 
 
 logging.disable(logging.INFO)
@@ -168,8 +172,9 @@ class CompletionTrainer:
         self.global_step = 0
         self.best_chamfer = 1000.0
 
-        self.ckpts_path = get_out_dir() / "ckpts"
-        self.all_ckpts_path = get_out_dir() / "all_ckpts"
+        base_out_dir = Path(hcfg("out_root", str))
+        self.ckpts_path = base_out_dir / "ckpts"
+        self.all_ckpts_path = base_out_dir / "all_ckpts"
 
         if self.ckpts_path.exists():
             self.restore_from_last_ckpt()
@@ -209,6 +214,8 @@ class CompletionTrainer:
                 self.global_step += 1
 
             if epoch % 10 == 0 or epoch == num_epochs - 1:
+                # Validation and plotting have been commented because not used in the experimentations
+
                 # self.val("train")
                 # self.val("val")
                 # self.plot("train")
@@ -435,7 +442,7 @@ def main() -> None:
         entity="entity",
         project="mapping_network",
         name=get_run_name(),
-        dir=str(get_out_dir()),
+        dir=str(hcfg("out_root", str)),
         config=get_cfg_copy(),
     )
 

@@ -1,6 +1,5 @@
 import os
 import sys
-import settings
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
@@ -11,12 +10,13 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import settings
 
 
 def export_embeddings() -> None:
     
     split = 'train' 
-    nerf_embeddings_root = Path(settings.NERF2VEC_EMBEDDINGS_DIR) / split  # TODO: test this path
+    nerf_embeddings_root = Path(settings.NERF2VEC_EMBEDDINGS_DIR) / split
     out_root = Path(settings.GENERATION_EMBEDDING_DIR)
     out_root.mkdir(parents=True, exist_ok=True)
    

@@ -1,9 +1,9 @@
 import os
 import sys
-import settings
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
+import settings
 
 from collections import defaultdict
 import math

@@ -101,3 +101,6 @@ def export() -> None:
                 f.create_dataset("uuid", data=uuids[0]) 
 
             idx += 1
+
+if __name__ == "__main__":
+    export()
