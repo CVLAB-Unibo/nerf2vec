@@ -27,7 +27,7 @@ from task_classification import config as classification_config
 
 
 @torch.no_grad()
-def draw_images(decoder, embeddings, device='cuda:0'):
+def draw_images(decoder, embeddings, device='cuda:0', class_idx=0):
 
     scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
@@ -41,7 +41,8 @@ def draw_images(decoder, embeddings, device='cuda:0'):
     color_bkgd = torch.ones((1,3), device=device) 
     
     img_name = str(uuid.uuid4())
-    plots_path = os.path.join('task_generation', 'GAN_plots') # TODO: check path
+    plots_path = os.path.join('task_generation', f'GAN_plots_{class_idx}') # TODO: test this path
+    os.makedirs(plots_path, exist_ok=True)
 
     for idx, emb in enumerate(embeddings):
         emb = torch.tensor(emb, device=device, dtype=torch.float32)
@@ -93,7 +94,7 @@ def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0, n_images
     for _ in range(0, n_images):
         idx = randint(0, embeddings.shape[0]-1)
         emb = embeddings[idx].unsqueeze(0).cuda()
-        draw_images(decoder, emb, device)
+        draw_images(decoder, emb, device, class_idx)
 
 
 def main() -> None:

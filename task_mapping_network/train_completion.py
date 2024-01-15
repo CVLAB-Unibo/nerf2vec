@@ -292,8 +292,8 @@ class CompletionTrainer:
 
             grid_weights_path = os.path.join(nerf_data_dir, 'grid.pth')  
             grid = torch.load(grid_weights_path, map_location='cpu')
-            grid['_binary'] = grid['_binary'].to_dense()#.unsqueeze(dim=0)
-            n_total_cells = 884736  # TODO: add this as config parameter (884736 if resolution == 96 else 2097152)
+            grid['_binary'] = grid['_binary'].to_dense()
+            n_total_cells = nerf2vec_config.GRID_NUMBER_OF_CELLS
             grid['occs'] = torch.empty([n_total_cells]) 
             grids.append(grid)
 

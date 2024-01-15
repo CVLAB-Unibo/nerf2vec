@@ -164,7 +164,6 @@ def do_retrieval(device='cuda:0'):
     plots_path = os.path.join('task_interp_and_retrieval', f'retrieval_plots_{split}')
     os.makedirs(plots_path, exist_ok=True)
 
-    # TODO: document this!
     recalls = get_recalls(embeddings, labels, [1, 5, 10], decoder, plots_path)
     for key, value in recalls.items():
         print(f"Recall@{key} : {100. * value:.2f}%")

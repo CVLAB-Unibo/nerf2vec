@@ -1,8 +1,15 @@
 """
-This module, `train_latent_gan.py`, is used to train a Generative Adversarial Network (GAN) on the latent codes of a given class. 
-The GAN consists of a generator and a discriminator, both with two layers, which are imported from the `latent_3d_points.src.generators_discriminators` module. 
+This module is used to train a Generative Adversarial Network (GAN) on the latent 
+codes of a given class. The GAN consists of a generator and a discriminator, both 
+with two layers, which are imported from the `latent_3d_points.src.generators_discriminators` module. 
+
 The training data is derived from the embeddings obtained by nerf2vec. 
-The output of the training process is stored in a directory specified by `paths.GENERATION_OUT_DIR`, with the directory name formatted to include the class index.
+
+The output of the training process is stored in a directory specified by `paths.GENERATION_OUT_DIR`, 
+with the directory name formatted to include the class index.
+
+The code in this module is based on the code from the repository: https://github.com/optas/latent_3d_points
+
 """
 import os
 import sys
@@ -10,9 +17,6 @@ import settings
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
-
-# TODO: fix comments in this module
-### To be used with the code from the repository https://github.com/optas/latent_3d_points
 
 import os.path as osp
 

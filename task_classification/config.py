@@ -28,7 +28,7 @@ WD = 1e-2
 NUM_EPOCHS = 150
 
 
-# TODO: complete this dictionary
+# Add any attributes that you want to be logged by wandb
 WANDB_CONFIG = {
 
 }

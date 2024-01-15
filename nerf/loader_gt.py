@@ -1,6 +1,6 @@
 """
-TODO: before delivery decide whether to remove the Dataset class from  NeRFLoader. 
-This because, at the moment, it's not useful. However, this reflects the NerfAcc implementation of this class.
+The NeRFLoderGT class inherits from Dataset, but it's not used as a Dataset in the training loop. This because the current
+implementation was inherited from the original NerfAcc implementation. In the future, it could be useful to remove this dependency.
 """
 import json
 import os

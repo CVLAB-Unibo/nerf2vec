@@ -57,7 +57,7 @@ class NeRFDataset(Dataset):
             device=self.device)
 
         nerf_loader.training = True
-        data = nerf_loader[0]  # The index has not any relevance when training is True
+        data = nerf_loader[0]  # NOTE: The index has not any relevance when training is True
         color_bkgd = data["color_bkgd"]
         rays = data["rays"]
         train_nerf = {
@@ -67,7 +67,8 @@ class NeRFDataset(Dataset):
 
         nerf_loader.training = False
         
-        test_data = nerf_loader[0]  # TODO: getting just the first image in the dataset. Evaluate whether to return more.
+        # Getting just the first image in the dataset for performance reasons. In the future, we could use more elements.
+        test_data = nerf_loader[0]  
         test_color_bkgd = test_data["color_bkgd"]
         test_rays = test_data["rays"]
         test_nerf = {
@@ -81,10 +82,10 @@ class NeRFDataset(Dataset):
         grid_weights_path = os.path.join(data_dir, 'grid.pth')  
         grid_weights = torch.load(grid_weights_path, map_location=self.device)
         grid_weights['_binary'] = grid_weights['_binary'].to_dense()
-        n_total_cells = 884736  # TODO: add this as config parameter (884736 if resolution == 96,  2097152 if resolution == 128)
+        n_total_cells = nerf2vec_config.GRID_NUMBER_OF_CELLS
         grid_weights['occs'] = torch.empty([n_total_cells]) 
         
-        N = 32000  # TODO: add this as config parameter
+        N = nerf2vec_config.GRID_BACKGROUND_CELLS_TO_SAMPLE
         background_indices, n_true_coordinates = self._sample_unoccupied_cells(N, grid_weights['_binary'], data_dir, n_total_cells)
 
         return train_nerf, test_nerf, mlp_weights, mlp_matrix, grid_weights, data_dir, background_indices, n_true_coordinates
@@ -331,7 +332,7 @@ class Nerf2vecTrainer:
             train_nerf, _, mlp_weights, mlp_matrix, grid_weights, _, background_indices, _ = batch
             rays = train_nerf['rays']
             color_bkgds = train_nerf['color_bkgd']
-            color_bkgds = color_bkgds[0].unsqueeze(0).expand(len(mlp_matrix), -1) # TODO: refactor this
+            color_bkgds = color_bkgds[0].unsqueeze(0).expand(len(mlp_matrix), -1)
             
             rays = rays._replace(origins=rays.origins.cuda(), viewdirs=rays.viewdirs.cuda())
             color_bkgds = color_bkgds.cuda()
