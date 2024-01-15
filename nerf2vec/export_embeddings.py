@@ -62,9 +62,7 @@ def load_nerf2vec_checkpoint():
     return ckpt
 
 
-def export_embeddings():
-
-    device = 'cuda:0'
+def export_embeddings(device = 'cuda:0'):
 
     train_dset_json = os.path.abspath(os.path.join('data', 'train.json'))
     train_dset = InrDataset(train_dset_json, device='cpu', nerf_weights_file_name=nerf2vec_config.NERF_WEIGHTS_FILE_NAME)
@@ -116,3 +114,9 @@ def export_embeddings():
 
             if idx % 5000 == 0:
                 print(f'Created {idx} embeddings for {split} split')
+
+def main() -> None:
+    export_embeddings(device=settings.DEVICE_NAME)
+
+if __name__ == "__main__":
+    main()

@@ -1,7 +1,4 @@
-import json
-import os
 import sys
-import numpy as np
 
 sys.path.append("..")
 
@@ -13,7 +10,6 @@ import h5py
 import torch
 import torch.nn.functional as F
 from hesiod import hcfg, hmain
-from pycarus.datasets.modelnet40 import ModelNet40
 from pycarus.datasets.ply import PlyDataset
 from pycarus.geometry.pcd import compute_udf_from_pcd, farthest_point_sampling
 from pycarus.geometry.pcd import random_point_sampling, shuffle_pcd
@@ -23,7 +19,7 @@ from pycarus.utils import progress_bar
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 
-from task_mapping_network.inr2vec.inr2vec_utils import get_mlps_batched_params, mlp_batched_forward
+from task_mapping_network.inr2vec.utils import get_mlps_batched_params, mlp_batched_forward
 
 
 class InrsDatasetCreator:

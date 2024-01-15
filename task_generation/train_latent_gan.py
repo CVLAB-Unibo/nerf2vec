@@ -11,6 +11,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
 
+# TODO: fix comments in this module
 ### To be used with the code from the repository https://github.com/optas/latent_3d_points
 
 import os.path as osp
@@ -23,6 +24,8 @@ from task_generation.latent_3d_points.src.generators_discriminators import (
 from task_generation.latent_3d_points.src.in_out import PointCloudDataSet, create_dir
 from task_generation.latent_3d_points.src.tf_utils import reset_tf_graph
 from task_generation.latent_3d_points.src.w_gan_gp import W_GAN_GP
+
+from task_classification import config as classification_config
 
 
 def train(class_idx=0):
@@ -78,3 +81,11 @@ def train(class_idx=0):
                 osp.join(synthetic_data_out_dir, "epoch_" + str(epoch) + ".npz"),
                 embeddings=syn_latent_data,
             )
+
+def main() -> None:
+    # Train a GAN for each class
+    for class_idx in range(classification_config.NUM_CLASSES):
+        train(class_idx)
+
+if __name__ == "__main__":
+    main()

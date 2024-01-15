@@ -511,7 +511,7 @@ class Nerf2vecTrainer:
         )
 
 def main():
-    nerf2vec = Nerf2vecTrainer()
+    nerf2vec = Nerf2vecTrainer(device=settings.DEVICE_NAME)
     nerf2vec.train()
 
 if __name__ == "__main__":

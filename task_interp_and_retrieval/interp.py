@@ -19,9 +19,7 @@ from nerf2vec.train_nerf2vec import NeRFDataset
 from nerf2vec.utils import get_class_label_from_nerf_root_path
 from models.encoder import Encoder
 from models.idecoder import ImplicitDecoder
-from nerf.utils import Rays, namedtuple_map, render_image
-from nerf.intant_ngp import NGPradianceField
-from nerfacc import ray_marching, rendering
+from nerf.utils import Rays, render_image
 
 import numpy as np
 import imageio.v2 as imageio
@@ -179,3 +177,9 @@ def get_dset_json_path(split):
 
 def is_nerf_augmented(data_dir):
     return "_A1" in data_dir or "_A2" in data_dir
+
+def main() -> None:
+    do_interpolation(settings.DEVICE_NAME)
+
+if __name__ == "__main__":
+    main()

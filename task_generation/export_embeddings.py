@@ -1,5 +1,6 @@
 import os
 import sys
+import settings
 script_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
@@ -8,8 +9,6 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-
-import settings
 
 
 def export_embeddings() -> None:
@@ -45,3 +44,8 @@ def export_embeddings() -> None:
         stacked_embeddings = np.stack(embeddings[class_id])
         np.savez_compressed(path_out, embeddings=stacked_embeddings)
 
+def main() -> None:
+    export_embeddings()
+
+if __name__ == "__main__":
+    main()

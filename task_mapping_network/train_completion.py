@@ -17,8 +17,8 @@ from torch import Tensor
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 
-from mapping_network.inr2vec_models.idecoder import ImplicitDecoder as INRDecoder
-from mapping_network.inr2vec_models.transfer import Transfer
+from task_mapping_network.inr2vec.models.idecoder import ImplicitDecoder as INRDecoder
+from task_mapping_network.inr2vec.models.transfer import Transfer
 from models.idecoder import ImplicitDecoder as NeRFDecoder
 from nerf.utils import Rays, render_image, render_image_GT
 from nerf2vec.utils import generate_rays, pose_spherical
@@ -29,7 +29,6 @@ from nerf2vec import config as nerf2vec_config
 
 
 logging.disable(logging.INFO)
-
 
 class InrEmbeddingDataset(Dataset):
     def __init__(self, nerfs_root: Path, inrs_root: Path, split: str) -> None:
@@ -102,7 +101,7 @@ class CompletionTrainer:
             inr_decoder_cfg["num_hidden_layers_after_skip"],
             inr_decoder_cfg["out_dim"],
         )
-        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"
+        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"  # TODO: MOVE THIS PATH
         inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
         inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
         self.inr_decoder = inr_decoder.cuda()
@@ -131,7 +130,7 @@ class CompletionTrainer:
         )
         nerf_decoder.eval()
         self.nerf_decoder = nerf_decoder.cuda()
-        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt"
+        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt" # TODO: MOVE THIS PATH
         print(f'loading nerf2vec weights: {ckpt_path}')
         ckpt = torch.load(ckpt_path)
         self.nerf_decoder.load_state_dict(ckpt["decoder"])
@@ -307,22 +306,12 @@ class CompletionTrainer:
         with torch.no_grad():
             embeddings_transfer = self.transfer(embedding_pcds)
 
-        """
-        def udfs_func(coords: Tensor, indices: List[int]) -> Tensor:
-            emb = embeddings_transfer[indices]
-            pred = torch.sigmoid(self.decoder(emb, coords))
-            pred = 1 - pred
-            pred *= 0.1
-            return pred
-
-        pred_pcds = sample_pcds_from_udfs(udfs_func, bs, 4096, (-1, 1), 0.05, 0.02, 2048, 1)
-        """
         pcds_2048 = random_point_sampling(pcds, 2048)
 
         # NeRF rendering parameters
         width = 224
         height = 224
-        camera_angle_x = 0.8575560450553894 # Parameter taken from traned NeRFs
+        camera_angle_x = 0.8575560450553894 # Parameter taken from trained NeRFs
         focal_length = 0.5 * width / np.tan(0.5 * camera_angle_x)
 
         max_images = 1
@@ -432,18 +421,15 @@ class CompletionTrainer:
             self.optimizer.load_state_dict(ckpt["optimizer"])
 
 
-run_cfg_file = sys.argv[1] if len(sys.argv) == 2 else None
-
-
 @hmain(
     base_cfg_dir="mapping_network/cfg/bases",
     template_cfg_file="mapping_network/cfg/completion.yaml",
-    run_cfg_file=run_cfg_file,
+    run_cfg_file=None,
     parse_cmd_line=False,
 )
-def train_completion() -> None:
+def main() -> None:
     wandb.init(
-        entity="dsr-lab",
+        entity="entity",
         project="mapping_network",
         name=get_run_name(),
         dir=str(get_out_dir()),
@@ -454,5 +440,5 @@ def train_completion() -> None:
     trainer.train()
 
 
-#if __name__ == "__main__":
-#    main()
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,3 @@
-import os
 
 LABELS_TO_IDS = {
     "02691156": 0,   # airplane

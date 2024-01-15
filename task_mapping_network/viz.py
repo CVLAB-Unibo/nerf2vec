@@ -5,8 +5,6 @@ import uuid
 
 import tqdm
 
-# sys.path.append("..")
-
 import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -18,8 +16,8 @@ from hesiod import hcfg, hmain
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from mapping_network.inr2vec_models.idecoder import ImplicitDecoder as INRDecoder
-from mapping_network.inr2vec_models.transfer import Transfer
+from task_mapping_network.inr2vec.models.idecoder import ImplicitDecoder as INRDecoder
+from task_mapping_network.inr2vec.models.transfer import Transfer
 from models.idecoder import ImplicitDecoder as NeRFDecoder
 from nerf.utils import Rays, render_image, render_image_GT
 from nerf2vec.utils import generate_rays, pose_spherical
@@ -102,7 +100,7 @@ def mapping_network_plot() -> None:
                 inr_decoder_cfg["num_hidden_layers_after_skip"],
                 inr_decoder_cfg["out_dim"],
         )
-        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"
+        inr_decoder_ckpt_path = "/media/data7/dsirocchi/nerf2vec/mapping_network/inr2vec_weights/ckpts/299.pt"  # TODO: MOVE THIS PATH
         inr_decoder_ckpt = torch.load(inr_decoder_ckpt_path)
         inr_decoder.load_state_dict(inr_decoder_ckpt["decoder"])
         inr_decoder = inr_decoder.cuda()
@@ -131,7 +129,7 @@ def mapping_network_plot() -> None:
         )
         nerf_decoder.eval()
         nerf_decoder = nerf_decoder.cuda()
-        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt"
+        ckpt_path = "/media/data7/dsirocchi/nerf2vec/classification/train/ckpts/499.pt" # TODO: MOVE THIS PATH
         print(f'loading nerf2vec weights: {ckpt_path}')
         ckpt = torch.load(ckpt_path)
         nerf_decoder.load_state_dict(ckpt["decoder"])
@@ -159,7 +157,7 @@ def mapping_network_plot() -> None:
                 / nerf2vec_config.GRID_CONFIG_N_SAMPLES
         ).item()
         
-        ckpt_path = "/media/data7/dsirocchi/nerf2vec/logs/completion/ckpts/299.pt"
+        ckpt_path = "/media/data7/dsirocchi/nerf2vec/logs/completion/ckpts/299.pt" # TODO: MOVE THIS PATH
         ckpt = torch.load(ckpt_path)
         embedding_dim = hcfg("embedding_dim", int)
         num_layers = hcfg("num_layers_transfer", int)
@@ -247,7 +245,6 @@ def mapping_network_plot() -> None:
                     
                     nerfs[idx]['mlp_base.params'] = [nerfs[idx]['mlp_base.params']]
                     """
-
                 
                     rgb_gt, _, _ = render_image_GT(
                         radiance_field=ngp_mlp, 
@@ -263,7 +260,6 @@ def mapping_network_plot() -> None:
                     )
                                 
                 
-
                 full_path = os.path.join(renderings_root_path, f'nerf_pred_{n_img}.png')        
                 imageio.imwrite(
                     full_path,
@@ -276,7 +272,7 @@ def mapping_network_plot() -> None:
                     (rgb_gt.cpu().detach().numpy()[0] * 255).astype(np.uint8)
                 )
                 
-            pcd_root_path = '/media/data7/dsirocchi/nerf2vec/mapping_network/point_clouds'
+            pcd_root_path = '/media/data7/dsirocchi/nerf2vec/mapping_network/point_clouds'  # TODO: MOVE THIS PATH
             nerf_path = Path(nerf_data_dir)
             pcd_source_path = os.path.join(pcd_root_path, nerf_path.parts[-2], split_name, f'{nerf_path.parts[-1]}.ply')
             pcd_destination_path = os.path.join(renderings_root_path, f'{nerf_path.parts[-2]}_{nerf_path.parts[-1]}.ply')

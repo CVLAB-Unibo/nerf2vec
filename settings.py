@@ -5,7 +5,7 @@ os.environ["WANDB_SILENT"] = "true"
 os.environ["WANDB_MODE"] = "disabled"
 
 cuda_idx = 0
-device_name = f'cuda:{cuda_idx}'
+DEVICE_NAME = f'cuda:{cuda_idx}'
 torch.cuda.set_device(cuda_idx)
 
 """

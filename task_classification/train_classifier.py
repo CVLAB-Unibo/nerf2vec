@@ -264,3 +264,10 @@ class InrEmbeddingClassifier:
             name=f'run_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}',
             config=classification_config.WANDB_CONFIG
         )
+
+def main() -> None:
+    classifier = InrEmbeddingClassifier(device=settings.DEVICE_NAME)
+    classifier.train()
+
+if __name__ == "__main__":
+    main()

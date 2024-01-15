@@ -6,12 +6,9 @@ parent_dir = os.path.dirname(script_dir)
 sys.path.append(parent_dir)
 
 import math
-import os
 from random import randint
 import uuid
 from nerf2vec.utils import get_rays
-from nerf2vec.utils import pose_spherical, generate_rays
-import tqdm
 
 
 import numpy as np
@@ -25,6 +22,8 @@ from nerf.utils import Rays, render_image
 
 import imageio.v2 as imageio
 from torch.cuda.amp import autocast
+
+from task_classification import config as classification_config
 
 
 @torch.no_grad()
@@ -66,7 +65,7 @@ def draw_images(decoder, embeddings, device='cuda:0'):
 
 
 @torch.no_grad()
-def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0):
+def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0, n_images=10):
 
     # Init nerf2vec 
     decoder = ImplicitDecoder(
@@ -91,7 +90,16 @@ def create_renderings_from_GAN_embeddings(device='cuda:0', class_idx=0):
     embeddings = np.load(latent_gan_embeddings_path)["embeddings"]
     embeddings = torch.from_numpy(embeddings)
 
-    for count in range(0, 100):
+    for _ in range(0, n_images):
         idx = randint(0, embeddings.shape[0]-1)
         emb = embeddings[idx].unsqueeze(0).cuda()
         draw_images(decoder, emb, device)
+
+
+def main() -> None:
+    # Create renderings for each class
+    for class_idx in range(0, classification_config.NUM_CLASSES):
+        create_renderings_from_GAN_embeddings(device=settings.DEVICE_NAME, class_idx=class_idx, n_images=10)
+
+if __name__ == "__main__":
+    main()

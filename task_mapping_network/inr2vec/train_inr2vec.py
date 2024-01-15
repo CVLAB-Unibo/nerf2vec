@@ -20,9 +20,9 @@ from torch import Tensor
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 
-from inr2vec_models.encoder import Encoder
-from inr2vec_models.idecoder import ImplicitDecoder
-from inr2vec_utils import get_mlp_params_as_matrix
+from task_mapping_network.inr2vec.models.encoder import Encoder
+from task_mapping_network.inr2vec.models.idecoder import ImplicitDecoder
+from task_mapping_network.inr2vec.utils import get_mlp_params_as_matrix
 
 logging.disable(logging.INFO)
 os.environ["WANDB_SILENT"] = "true"

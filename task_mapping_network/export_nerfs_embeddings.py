@@ -14,24 +14,6 @@ from task_classification import config as classification_config
 
 import h5py
 
-LABELS_TO_IDS_FOR_MAPPING = {
-    "02691156": 0,   # airplane
-    "02828884": 1,   # bench
-    "02933112": 2,   # cabinet
-    "02958343": 3,   # car
-    '02992529': 4,   # tablet (delete?)
-    "03001627": 5,   # chair
-    "03211117": 6,   # display
-    "03636649": 7,   # lamp
-    "03691459": 8,   # speaker
-    "03948459": 9,   # gun (delete?)
-    "04090263": 10,  # rifle
-    "04256520": 11,  # sofa
-    "04379243": 12,  # table
-    "04401088": 13,  # phone
-    "04530566": 14   # watercraft
-}
-
 class InrDataset(Dataset):
     def __init__(self, split_json: str, device: str, nerf_weights_file_name: str) -> None:
         super().__init__()
@@ -54,9 +36,7 @@ class InrDataset(Dataset):
         data_dir = self.nerf_paths[index]
         weights_file_path = os.path.join(data_dir, self.nerf_weights_file_name)
 
-        # TODO: TEMP
-        class_label = get_class_label(weights_file_path)
-        class_id = LABELS_TO_IDS_FOR_MAPPING[get_class_label(weights_file_path)] if class_label != -1 else class_label
+        class_id = classification_config.LABELS_TO_IDS[get_class_label(weights_file_path)]
 
         matrix = torch.load(weights_file_path, map_location=torch.device(self.device))
         matrix = get_mlp_params_as_matrix(matrix['mlp_base.params'])
@@ -116,12 +96,11 @@ def export_embeddings_for_mapping():
             with torch.no_grad():
                 embeddings = encoder(matrices)
 
-            out_root = Path('/media/data7/dsirocchi/nerf2vec/mapping_network/nerf_embeddings')
+            out_root = Path('/media/data7/dsirocchi/nerf2vec/mapping_network/nerf_embeddings')  # TODO: MOVE THIS PATH
             h5_path = out_root / Path(f"{split}") / f"{idx}.h5"
             h5_path.parent.mkdir(parents=True, exist_ok=True)
 
             with h5py.File(h5_path, "w") as f:
-                # print(f'dir: {data_dirs[0]}, class: {class_ids[0]}')
 
                 p = Path(data_dirs[0])
                 uuid = p.parts[-1].replace('.ply','')

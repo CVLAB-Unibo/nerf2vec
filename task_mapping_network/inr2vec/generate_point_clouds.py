@@ -1,5 +1,4 @@
 import json
-from multiprocessing import Process, Queue
 import os
 from anyio import Path
 import open3d as o3d
@@ -23,9 +22,9 @@ def get_dataset_json(root:str, split: str):
         
         return folders
 
-split_json_root_path = '/media/data7/dsirocchi/nerf2vec/data'
-out_point_clouds_path = '/media/data7/dsirocchi/nerf2vec/mapping_network/point_clouds'
-mesh_root = '/media/data7/dsirocchi/ShapeNetCore.v1'
+split_json_root_path = '/media/data7/dsirocchi/nerf2vec/data'   # TODO: MOVE THIS PATH
+out_point_clouds_path = '/media/data7/dsirocchi/nerf2vec/mapping_network/point_clouds'  # TODO: MOVE THIS PATH
+mesh_root = '/media/data7/dsirocchi/ShapeNetCore.v1'    # TODO: MOVE THIS PATH
 
 splits = ["train", "validation", "test"]
 
