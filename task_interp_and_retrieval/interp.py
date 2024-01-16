@@ -61,7 +61,7 @@ def draw_images(
 
 
 @torch.no_grad()
-def do_interpolation(device = 'cuda:0'):
+def do_interpolation(device = 'cuda:0', split = nerf2vec_config.TRAIN_SPLIT):
     scene_aabb = torch.tensor(nerf2vec_config.GRID_AABB, dtype=torch.float32, device=device)
     render_step_size = (
         (scene_aabb[3:] - scene_aabb[:3]).max()
@@ -100,7 +100,6 @@ def do_interpolation(device = 'cuda:0'):
     decoder = decoder.cuda()
     decoder.eval()
 
-    split = nerf2vec_config.TRAIN_SPLIT
     dset_json_path = get_dset_json_path(split)
     dset = NeRFDataset(dset_json_path, device='cpu')  
 
@@ -182,7 +181,7 @@ def is_nerf_augmented(data_dir):
     return "_A1" in data_dir or "_A2" in data_dir
 
 def main() -> None:
-    do_interpolation(settings.DEVICE_NAME)
+    do_interpolation(device=settings.DEVICE_NAME, split=nerf2vec_config.TRAIN_SPLIT)
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,10 @@
 import os
-import torch
 
 os.environ["WANDB_SILENT"] = "true"
 os.environ["WANDB_MODE"] = "disabled"
 
 cuda_idx = 0
-DEVICE_NAME = f'cuda:{cuda_idx}'
-torch.cuda.set_device(cuda_idx)
+DEVICE_NAME = 'cuda:%s' % cuda_idx  # Keep compatibility with older code
 
 """
 # ##################################################
@@ -28,7 +26,9 @@ NERF2VEC_EMBEDDINGS_DIR = os.path.join('task_classification', 'embeddings')
 CLASSIFICATION_OUTPUT_DIR = os.path.join('classification', 'classifier')
 
 # GENERATION
-GENERATION_EMBEDDING_DIR = os.path.join('/', 'media', 'data4TB', 'sirocchi', 'nerf2vec', 'shape_generation', 'latent_embeddings')
+GENERATION_EMBEDDING_DIR = os.path.join('task_generation', 'latent_embeddings')
 GENERATION_OUT_DIR = os.path.join('task_generation', 'experiments', '{}')  # The placeholder will contain the class index
 GENERATION_NERF2VEC_FULL_CKPT_PATH = os.path.join('task_classification', 'train', 'ckpts', '499.pt')
-GENERATION_LATENT_GAN_FULL_CKPT_PATH = os.path.join('task_generation', 'experiments', 'nerf2vec_{}', 'latent_gan_ckpts', 'epoch_2000.ckpt')  # The placeholder will contain the class index
+GENERATION_LATENT_GAN_FULL_CKPT_PATH = os.path.join('task_generation', 'experiments', 'nerf2vec_{}', 'generated_embeddings', 'epoch_2000.npz')  # The placeholder will contain the class index
+    
+

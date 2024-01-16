@@ -35,10 +35,13 @@ FG_WEIGHT = 1 - BG_WEIGHT
 # GRID
 #
 import os
-from nerfacc import ContractionType
+try:
+    from nerfacc import ContractionType
+    GRID_CONTRACTION_TYPE = ContractionType.AABB
+except ImportError:
+    pass
 GRID_AABB = [-0.7, -0.7, -0.7, 0.7, 0.7, 0.7]
 GRID_RESOLUTION = 96
-GRID_CONTRACTION_TYPE = ContractionType.AABB
 GRID_CONFIG_N_SAMPLES = 1024
 
 GRID_RECONSTRUCTION_TOTAL_ITERATIONS = 20
@@ -123,17 +126,19 @@ LABELS_TO_IDS = {
     "02828884": 1,   # bench
     "02933112": 2,   # cabinet
     "02958343": 3,   # car
-    #'02992529': 4,   # tablet (delete?)
     "03001627": 4,   # chair
     "03211117": 5,   # display
-    "03636649": 6,   # lamp
-    "03691459": 7,   # speaker
-    #"03948459": 9,   # gun (delete?)
-    "04090263": 8,  # rifle
-    "04256520": 9,  # sofa
+    "03636649": 6,   # lamp
+    "03691459": 7,   # speaker
+    "04090263": 8,   # rifle
+    "04256520": 9,   # sofa
     "04379243": 10,  # table
     "04401088": 11,  # phone
     "04530566": 12   # watercraft
 }
+
+# TODO: COMMENT THESE!
+#'02992529': 4, tablet delete?
+#"03948459": 9, gun delete?
 
 NUM_CLASSES = len(LABELS_TO_IDS)

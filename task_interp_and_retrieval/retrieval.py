@@ -89,6 +89,8 @@ def draw_images(decoder, embeddings, plots_path, device):
             (rgb_A.squeeze(dim=0).cpu().detach().numpy() * 255).astype(np.uint8)
         )
 
+        print(f'  {img_name}_{idx}.png saved')
+
 
 @torch.no_grad()
 def get_recalls(gallery: Tensor, 
@@ -112,9 +114,9 @@ def get_recalls(gallery: Tensor,
 
             # Draw the query and the first N neighbours
             if dic_renderings[label_query] < 10:
+                print(f'Generating images for class {label_query}...')
                 draw_images(decoder, gallery[indices_matched], plots_path, device)
                 dic_renderings[label_query] += 1
-                print(dic_renderings)
             
             for k in kk:
                 indices_matched_temp = indices_matched[1 : k + 1]
@@ -127,7 +129,7 @@ def get_recalls(gallery: Tensor,
     return recalls
 
 @torch.no_grad()
-def do_retrieval(device='cuda:0'):
+def do_retrieval(device='cuda:0', split=nerf2vec_config.TEST_SPLIT):
 
     # Init nerf2vec 
     decoder = ImplicitDecoder(
@@ -148,7 +150,6 @@ def do_retrieval(device='cuda:0'):
     ckpt = torch.load(ckpt_path)
     decoder.load_state_dict(ckpt["decoder"])
     
-    split = nerf2vec_config.TEST_SPLIT
     dset_root = Path(settings.NERF2VEC_EMBEDDINGS_DIR)
     dset = InrEmbeddingDataset(dset_root, split)
 
@@ -172,7 +173,7 @@ def do_retrieval(device='cuda:0'):
 
 
 def main() -> None:
-    do_retrieval(device=settings.DEVICE_NAME)
+    do_retrieval(device=settings.DEVICE_NAME, split=nerf2vec_config.TEST_SPLIT)
 
 if __name__ == "__main__":
     main()

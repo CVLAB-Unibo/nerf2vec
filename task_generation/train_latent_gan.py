@@ -41,7 +41,8 @@ def train(class_idx=0):
     n_syn_samples = 1000  # how many synthetic samples to produce at each save step
     saver_step = np.hstack([np.array([1, 5, 10]), np.arange(50, n_epochs + 1, 50)])
 
-    latent_codes = np.load("{}_{}.npz".format(settings.GENERATION_EMBEDDING_DIR, class_idx))["embeddings"]
+    latent_codes_path = os.path.join(settings.GENERATION_EMBEDDING_DIR, "embeddings_{}.npz".format(class_idx))
+    latent_codes = np.load(latent_codes_path)["embeddings"]
     latent_data = PointCloudDataSet(latent_codes)
     print(latent_data.num_examples)
 
@@ -86,7 +87,7 @@ def train(class_idx=0):
                 embeddings=syn_latent_data,
             )
 
-def main() -> None:
+def main():
     # Train a GAN for each class
     for class_idx in range(nerf2vec_config.NUM_CLASSES):
         train(class_idx)
