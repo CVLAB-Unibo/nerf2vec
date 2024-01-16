@@ -17,7 +17,7 @@ pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindi
 conda install python=3.8.18
 conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia
 conda install -c anaconda pip
-pip install <git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch>
+pip install git+https://github.com/NVlabs/tiny-cuda-nn/\#subdirectory=bindings/torch
 conda install -c conda-forge cudatoolkit-dev
 nvcc --version
 conda install -c conda-forge opencv
