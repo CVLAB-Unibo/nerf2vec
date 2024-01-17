@@ -1,6 +1,6 @@
 # IMPORTANT: Use relative paths to the root of the project or absolute paths
 
-inrs_root: /media/data7/dsirocchi/nerf2vec/task_mapping_network/inrs
+inrs_root: task_mapping_network/inrs
 
 num_queries_on_surface: 3_500
 stds: [0.003, 0.01, 0.1]

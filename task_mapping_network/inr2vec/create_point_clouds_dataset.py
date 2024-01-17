@@ -16,6 +16,7 @@ def get_dataset_json(root:str, split: str):
             dset = json.load(file)
         
         for nerf_path in dset:
+            # Skip augmented data
             if nerf_path.endswith('_A1') or nerf_path.endswith('_A2'):
                 continue
 
@@ -26,10 +27,11 @@ def get_dataset_json(root:str, split: str):
         return folders
 
 @hmain(
-    base_cfg_dir="mapping_network/cfg/bases",
-    template_cfg_file="mapping_network/cfg/pcd_dataset.yaml",
+    base_cfg_dir="task_mapping_network/cfg/bases",
+    template_cfg_file="task_mapping_network/cfg/pcd_dataset.yaml",
     run_cfg_file=None,
     parse_cmd_line=False,
+    out_dir_root="task_mapping_network/logs"
 )
 def create_dataset(): 
 
@@ -37,7 +39,9 @@ def create_dataset():
     out_point_clouds_path = hcfg("out_point_clouds_path", str)
     mesh_root = hcfg("shapenet_root", str)
 
+
     splits = hcfg("splits", List[str])
+    
 
     for split in splits:
         shapes = get_dataset_json(split_json_root_path, split)

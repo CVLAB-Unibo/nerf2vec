@@ -1,13 +1,13 @@
 # IMPORTANT: Use relative paths to the root of the project or absolute paths
 
-inrs_root: "/media/data7/dsirocchi/nerf2vec/task_mapping_network/inrs"
-ckpt_path: "/media/data7/dsirocchi/nerf2vec/task_mapping_network/inr2vec_weights/ckpts/299.pt"
-out_root: "/media/data7/dsirocchi/nerf2vec/task_mapping_network/inr_embeddings"
+inrs_root: "task_mapping_network/inrs"
+ckpt_path: "task_mapping_network/inr2vec_weights/ckpts/299.pt"
+out_root: "task_mapping_network/inr_embeddings"
 
-nerf2vec_ckpt_path: "/media/data4TB/sirocchi/nerf2vec/nerf2vec/train/ckpts/499.pt"
-nerf2vec_train_json_path: "/media/data4TB/sirocchi/nerf2vec/data/train.json"
-nerf2vec_val_json_path: "/media/data4TB/sirocchi/nerf2vec/data/val.json"
-nerf2vec_test_json_path: "/media/data4TB/sirocchi/nerf2vec/data/test.json"
+nerf2vec_ckpt_path: "nerf2vec/train/ckpts/499.pt"
+nerf2vec_train_json_path: "data/train.json"
+nerf2vec_val_json_path: "data/val.json"
+nerf2vec_test_json_path: "data/test.json"
 
 encoder:
   hidden_dims: [512, 512, 1024, 1024]

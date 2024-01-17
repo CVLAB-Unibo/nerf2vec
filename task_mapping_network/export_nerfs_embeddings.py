@@ -56,6 +56,7 @@ class InrDataset(Dataset):
     base_cfg_dir="cfg/bases",
     template_cfg_file="mapping_network/cfg/export_embeddings.yaml",
     create_out_dir=False,
+    out_dir_root="task_mapping_network/logs"
 )
 def export_embeddings():
 

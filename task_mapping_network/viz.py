@@ -75,6 +75,7 @@ class InrEmbeddingDataset(Dataset):
     run_cfg_file="mapping_network/cfg/completion.yaml",
     parse_cmd_line=False,
     create_out_dir=False,
+    out_dir_root="task_mapping_network/logs"
 )
 @torch.no_grad()
 def mapping_network_plot() -> None:
