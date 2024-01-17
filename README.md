@@ -51,61 +51,82 @@ The generation task is based on a Latent GAN model detailed at [THIS](https://gi
 ### Mapping Network
 The mapping network task requires the training of the inr2vec framework. Please, refer to [THIS](https://github.com/CVLAB-Unibo/inr2vec?tab=readme-ov-file#setup) page to properly configure your environment.
 
-## Training and tasks
+## Training and experiments
 This sections contains the details required to run the code.
 
-**IMPORTANT NOTE**: each module cited below *should* be executed from the root of the project, and not within the corresponding packages.
+**IMPORTANT NOTES**: 
+1. each module cited below *must* be executed from the root of the project, and not within the corresponding packages.
 
-**settings.py**: explain...
+2. the file *settings.py* contains all the paths and generic configurations that are used from each module explained below.
 
-### Train nerf2vec
+3. Some training and experiments, such as the training of the *nerf2vec* framework and the classification task, are structured to use the *wandb* library. If you want to use it, then you need to change the following two variables: ``` os.environ["WANDB_SILENT"]``` and  ```os.environ["WANDB_MODE"]```, which are located at the beginning of the *settings.py* module. 
 
+## Train *nerf2vec*
+Execute the following command to train the *nerf2vec* framework:
 ```bash
 python nerf2vec/train_nerf2vec.py
 ```
+If you have enabled *wandb*, then you should update its settings located in the *config_wandb* method.
 
-### Retrieval task
+## Export *nerf2vec* embeddings
+Execute the following command to export the *nerf2vec*'s embeddings:
+```bash
+python nerf2vec/export_embeddings.py
+```
+Note that these embeddings are **necessary** for other tasks, such as classification, retrieval and generation.
 
+## Retrieval task
+Execute the following command to perform the retrieval task:
 ```bash
 python task_interp_and_retrieval/retrieval.py
 ```
+The results will be shown in the *task_interp_and_retrieval/retrieval_plots_X* folder, where X depends on the chosen split (i.e., train, validation or test). The split che be set in the main method of the retrieval.py module.
 
-The results will be shown in the task_interp_and_retrieval/retrieval_plots_X folder, where X depends on the chosen split. The split che be set in the main method of the retrieval.py module.
-Note that each file generated for the same retrieval iteration will have the same UUID, with a suffix that is the indices. 
+Each file generated during a specific retrieval iteration will be named using the same prefix represented by a randomly generated UUID.
 
 
-### Interpolation task
-The results will be shown in the task_interp_and_retrieval/called interp_plots_X folder, where X depends on the chosen split. The split che be set in the main method of the interp.py module.
-
+## Interpolation task
+Execute the following command to perform the interpolation task:
 ```bash
 python task_interp_and_retrieval/interp.py
 ```
+The results will be shown in the *task_interp_and_retrieval/interp_plots_X* folder, where X depends on the chosen split (i.e., train, validation or test). The split che be set in the main method of the retrieval.py module.
 
-### Generation task
-In order to properly genereate e see new embeddings, it is necessary to execute the following operations respecting the order:
-
-1. export embeddings
-This task will create the folder task_generation/latent_embeddings...
+## Classification task
+Execute the following command to perform the classification task:
 ```bash
+python task_classification/train_classifier.py
+```
+If you have enabled *wandb*, then you should update its settings located in the *config_wandb* method.
+
+## Generation task
+In order to generate and visualize the new embeddings, it is necessary to execute some operations following a specific order.
+
+### 1) Export embeddings
+The following command creates the folder *task_generation/latent_embeddings*, which will contain the *nerf2vec*'s embedding properly organized for this task.
+```bash 
 python task_generation/export_embeddings.py
 ```
 
-2. train GANs
-This task will create the folder task_generation/experiments...
+### 2) Train GANs
+The following command creates the folder *task_generation/experiments*, which will contain both the weights of the trained models and the generated embeddings:
 ```bash
 python task_generation/train_latent_gan.py
 ```
-Specific environment required
-This task will create one GAN for each class.
-The train method contained in the train_latent_gan.py has all the hyper-parameters used to train the GANs.
+All the hyperparameters used to train the Latent GANs can be found inside the *train_latent_gan.py* module.
 
-3. create renderings
-Change environment again.
+Note that this step requires to enable a specific environment, as explained before.
+
+### 3) Create renderings
+The following command create renderings from the embeddings generated during the previous step:
 ```bash
 python task_generation/viz_nerf.py 
 ```
-GAN_plots_X where X depends on the chosen class
-GENERATION_LATENT_GAN_FULL_CKPT_PATH this path depends on the number of epochs used to train the models.
+The renderings will be created in the *GAN_plots_X* folder, where X is the ID of a specific class.
+
+
+## Mapping network map
+Please, for this task refer to [THIS](task_mapping_network/README.md) README.
 
 
  

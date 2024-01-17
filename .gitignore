@@ -51,7 +51,8 @@ task_mapping_network/inr_embeddings
 
 logs/
 
-TO_REMOVE_FROM_FINAL_RELEASE/
+TO_REMOVE_FROM_FINAL_RELEASE/*
+nerf2vec/embeddings/
 
 retrieval_plots_*/
 latent_embeddings_*/

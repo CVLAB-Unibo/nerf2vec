@@ -20,10 +20,10 @@ TEST_DSET_JSON = os.path.abspath(os.path.join('data', 'test.json'))
 # NERF2VEC
 NERF2VEC_CKPTS_PATH = os.path.join('nerf2vec', 'train', 'ckpts')
 NERF2VEC_ALL_CKPTS_PATH = os.path.join('nerf2vec', 'train', 'all_ckpts')
-NERF2VEC_EMBEDDINGS_DIR = os.path.join('task_classification', 'embeddings') 
+NERF2VEC_EMBEDDINGS_DIR = os.path.join('nerf2vec', 'embeddings') 
 
 # CLASSIFICATION
-CLASSIFICATION_OUTPUT_DIR = os.path.join('classification', 'classifier')
+CLASSIFICATION_OUTPUT_DIR = os.path.join('task_classification', 'train')
 
 # GENERATION
 GENERATION_EMBEDDING_DIR = os.path.join('task_generation', 'latent_embeddings')

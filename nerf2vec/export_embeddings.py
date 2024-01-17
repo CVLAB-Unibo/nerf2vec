@@ -50,7 +50,7 @@ class InrDataset(Dataset):
         return matrix, class_id, data_dir
 
 def load_nerf2vec_checkpoint():
-    ckpts_path = Path(os.path.join('classification', 'train', 'ckpts'))
+    ckpts_path = Path(settings.NERF2VEC_CKPTS_PATH)
     ckpt_paths = [p for p in ckpts_path.glob("*.pt") if "best" not in p.name]
     error_msg = "Expected only one ckpt apart from best, found none or too many."
     assert len(ckpt_paths) == 1, error_msg

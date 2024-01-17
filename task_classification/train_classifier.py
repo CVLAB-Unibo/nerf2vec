@@ -129,6 +129,7 @@ class InrEmbeddingClassifier:
         start_epoch = self.epoch
 
         for epoch in range(start_epoch, num_epochs):
+            print(f'epoch {epoch}/{num_epochs} started...')
             self.epoch = epoch
 
             self.net.train()
