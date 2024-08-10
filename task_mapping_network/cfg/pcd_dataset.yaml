@@ -1,5 +1,5 @@
 splits: ["train", "validation", "test"]
 
 split_json_root_path: "data"
-out_point_clouds_path: "mapping_network/point_clouds"
+out_point_clouds_path: "task_mapping_network/point_clouds"
 shapenet_root: "/media/data7/dsirocchi/ShapeNetCore.v1" 
